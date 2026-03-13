@@ -1,9 +1,12 @@
 import { analyzeRun, formatDuration, formatNumber, runToCsv } from "./analysis.js";
 import { RunCharts } from "./charts.js";
+import { IMUView } from "./imuview.js";
 import { MapView } from "./mapview.js";
 import { RunRecorder } from "./recorder.js";
 import { SensorManager } from "./sensors.js";
 import { RunStorage } from "./storage.js";
+
+const GRAVITY = 9.80665;
 
 function downloadBlob(filename, content, mimeType) {
   const blob = new Blob([content], { type: mimeType });
@@ -13,6 +16,28 @@ function downloadBlob(filename, content, mimeType) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function parseLimitValue(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (!value || value === "-") {
+    return 0;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+
+  return numeric;
+}
+
+function formatLimit(value, suffix) {
+  return value > 0 ? `${value} ${suffix}` : "Unlimited";
+}
+
+function formatG(value) {
+  return `${value.toFixed(2)} g`;
 }
 
 export class TelemetryUI {
@@ -26,8 +51,8 @@ export class TelemetryUI {
       onStatus: (_, recording) => this.setRecordingState(recording),
     });
     this.sensors = new SensorManager({
-      onLocation: (payload) => this.recorder.ingestLocation(payload),
-      onMotion: (payload) => this.recorder.ingestMotion(payload),
+      onLocation: (payload) => this.handleLocation(payload),
+      onMotion: (payload) => this.handleMotion(payload),
       onStatus: (type, message) => this.handleSensorStatus(type, message),
     });
 
@@ -35,12 +60,20 @@ export class TelemetryUI {
     this.selectedRun = null;
     this.mapView = null;
     this.charts = null;
+    this.imuView = null;
+    this.recordingActive = false;
+    this.imuStreaming = false;
+    this.elapsedTimer = null;
+    this.maxDurationTimer = null;
   }
 
   async init() {
     this.cacheElements();
+    this.imuView = new IMUView(this.imuMount);
     this.bindEvents();
     this.registerPwa();
+    this.updateSettingSummary();
+    this.drawGForceCircle();
     await this.refreshRuns();
   }
 
@@ -53,12 +86,26 @@ export class TelemetryUI {
     this.motionStatus = document.getElementById("motionStatus");
     this.permissionMessage = document.getElementById("permissionMessage");
     this.sampleCount = document.getElementById("sampleCount");
+    this.elapsedValue = document.getElementById("elapsedValue");
     this.runList = document.getElementById("runList");
     this.runDetails = document.getElementById("runDetails");
     this.detailTitle = document.getElementById("detailTitle");
     this.exportJsonButton = document.getElementById("exportJsonButton");
     this.exportCsvButton = document.getElementById("exportCsvButton");
     this.installButton = document.getElementById("installButton");
+    this.sampleRateInput = document.getElementById("sampleRateInput");
+    this.maxDurationInput = document.getElementById("maxDurationInput");
+    this.rateSummary = document.getElementById("rateSummary");
+    this.durationSummary = document.getElementById("durationSummary");
+    this.lateralG = document.getElementById("lateralG");
+    this.longitudinalG = document.getElementById("longitudinalG");
+    this.verticalG = document.getElementById("verticalG");
+    this.gForceCanvas = document.getElementById("gForceCanvas");
+    this.enableImuButton = document.getElementById("enableImuButton");
+    this.disableImuButton = document.getElementById("disableImuButton");
+    this.imuMount = document.getElementById("imuMount");
+    this.pages = [...document.querySelectorAll(".page")];
+    this.tabButtons = [...document.querySelectorAll(".tab-button")];
   }
 
   bindEvents() {
@@ -66,6 +113,15 @@ export class TelemetryUI {
     this.stopButton.addEventListener("click", () => this.handleStopRun());
     this.exportJsonButton.addEventListener("click", () => this.exportRun("json"));
     this.exportCsvButton.addEventListener("click", () => this.exportRun("csv"));
+    this.sampleRateInput.addEventListener("input", () => this.updateSettingSummary());
+    this.maxDurationInput.addEventListener("input", () => this.updateSettingSummary());
+    this.enableImuButton.addEventListener("click", () => this.handleEnableImu());
+    this.disableImuButton.addEventListener("click", () => this.handleDisableImu());
+
+    for (const button of this.tabButtons) {
+      button.addEventListener("click", () => this.showPage(button.dataset.page));
+    }
+
     this.installButton.addEventListener("click", async () => {
       if (!this.deferredPrompt) {
         return;
@@ -93,33 +149,207 @@ export class TelemetryUI {
     }
   }
 
+  showPage(pageId) {
+    for (const page of this.pages) {
+      page.classList.toggle("active", page.id === pageId);
+    }
+
+    for (const button of this.tabButtons) {
+      button.classList.toggle("active", button.dataset.page === pageId);
+    }
+  }
+
+  getRecorderOptions() {
+    return {
+      sampleRateHz: parseLimitValue(this.sampleRateInput.value),
+      maxDurationSeconds: parseLimitValue(this.maxDurationInput.value),
+    };
+  }
+
+  updateSettingSummary() {
+    const options = this.getRecorderOptions();
+    this.rateSummary.textContent = formatLimit(options.sampleRateHz, "Hz");
+    this.durationSummary.textContent = formatLimit(options.maxDurationSeconds, "s");
+  }
+
   async handleStartRun() {
-    const permissions = await this.sensors.requestPermissions();
+    const permissions = await this.sensors.requestPermissions({ location: true, motion: true });
     if (!permissions.ok) {
       this.showPermissionMessage(permissions.issues.join(" "));
     } else {
       this.showPermissionMessage("");
     }
 
-    this.recorder.start();
-    this.sensors.start();
+    const options = this.getRecorderOptions();
+    this.recordingActive = true;
+    this.recorder.start(options);
     this.startButton.disabled = true;
     this.stopButton.disabled = false;
+    this.startElapsedTimer();
+    this.scheduleAutoStop(options.maxDurationSeconds);
+    this.syncSensors();
   }
 
-  async handleStopRun() {
-    this.sensors.stop();
+  async handleStopRun(reason = "manual") {
+    if (!this.recordingActive && !this.recorder.isRecording()) {
+      return;
+    }
+
+    this.recordingActive = false;
+    this.clearMaxDurationTimer();
+    this.stopElapsedTimer();
+    this.syncSensors();
+
     const run = this.recorder.stop();
     this.startButton.disabled = false;
     this.stopButton.disabled = true;
+    this.elapsedValue.textContent = "0:00";
 
-    if (!run) {
+    if (!run || run.samples.length === 0) {
+      this.showPermissionMessage("No telemetry samples were captured for this run.");
       return;
+    }
+
+    if (reason === "auto-stop") {
+      this.showPermissionMessage("Recording stopped automatically at the configured time limit.");
     }
 
     const analyzed = analyzeRun(run);
     await this.storage.saveRun(analyzed);
     await this.refreshRuns(analyzed.id);
+  }
+
+  async handleEnableImu() {
+    const permissions = await this.sensors.requestPermissions({ location: false, motion: true });
+    if (!permissions.ok) {
+      this.showPermissionMessage(permissions.issues.join(" "));
+      return;
+    }
+
+    this.imuStreaming = true;
+    this.updateImuButtons();
+    this.syncSensors();
+    this.showPage("imuPage");
+  }
+
+  handleDisableImu() {
+    this.imuStreaming = false;
+    this.updateImuButtons();
+    this.syncSensors();
+  }
+
+  updateImuButtons() {
+    this.enableImuButton.disabled = this.imuStreaming;
+    this.disableImuButton.disabled = !this.imuStreaming;
+  }
+
+  syncSensors() {
+    this.sensors.setStreams({
+      location: this.recordingActive,
+      motion: this.recordingActive || this.imuStreaming,
+    });
+    this.updateImuButtons();
+  }
+
+  handleLocation(payload) {
+    this.recorder.ingestLocation(payload);
+  }
+
+  handleMotion(payload) {
+    this.drawGForceCircle(payload);
+    this.imuView.update(payload);
+    this.recorder.ingestMotion(payload);
+  }
+
+  startElapsedTimer() {
+    this.stopElapsedTimer();
+    this.elapsedValue.textContent = "0:00";
+    this.elapsedTimer = window.setInterval(() => {
+      if (!this.recorder.run?.startedAt) {
+        return;
+      }
+      const elapsed = performance.timeOrigin + performance.now() - this.recorder.run.startedAt;
+      this.elapsedValue.textContent = formatDuration(elapsed);
+    }, 250);
+  }
+
+  stopElapsedTimer() {
+    if (this.elapsedTimer) {
+      window.clearInterval(this.elapsedTimer);
+      this.elapsedTimer = null;
+    }
+  }
+
+  scheduleAutoStop(maxDurationSeconds) {
+    this.clearMaxDurationTimer();
+    if (maxDurationSeconds <= 0) {
+      return;
+    }
+    this.maxDurationTimer = window.setTimeout(() => {
+      this.handleStopRun("auto-stop");
+    }, maxDurationSeconds * 1000);
+  }
+
+  clearMaxDurationTimer() {
+    if (this.maxDurationTimer) {
+      window.clearTimeout(this.maxDurationTimer);
+      this.maxDurationTimer = null;
+    }
+  }
+
+  drawGForceCircle(motion = null) {
+    const context = this.gForceCanvas.getContext("2d");
+    const width = this.gForceCanvas.width;
+    const height = this.gForceCanvas.height;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const radius = Math.min(width, height) * 0.34;
+    const lateral = (motion?.accelX ?? 0) / GRAVITY;
+    const longitudinal = -((motion?.accelY ?? 0) / GRAVITY);
+    const vertical = (motion?.accelZ ?? 0) / GRAVITY;
+    const scale = radius / 1.6;
+    const pointX = centerX + Math.max(-1.6, Math.min(1.6, lateral)) * scale;
+    const pointY = centerY + Math.max(-1.6, Math.min(1.6, longitudinal)) * scale;
+
+    context.clearRect(0, 0, width, height);
+    context.strokeStyle = "rgba(255,255,255,0.16)";
+    context.lineWidth = 2;
+    context.beginPath();
+    context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    context.stroke();
+
+    context.beginPath();
+    context.arc(centerX, centerY, radius * 0.5, 0, Math.PI * 2);
+    context.stroke();
+
+    context.beginPath();
+    context.moveTo(centerX - radius, centerY);
+    context.lineTo(centerX + radius, centerY);
+    context.moveTo(centerX, centerY - radius);
+    context.lineTo(centerX, centerY + radius);
+    context.stroke();
+
+    context.fillStyle = "rgba(126,200,255,0.18)";
+    context.beginPath();
+    context.arc(centerX, centerY, radius * 0.12, 0, Math.PI * 2);
+    context.fill();
+
+    context.fillStyle = "#6ef3b0";
+    context.beginPath();
+    context.arc(pointX, pointY, 12, 0, Math.PI * 2);
+    context.fill();
+
+    context.fillStyle = "#9db0bb";
+    context.font = "600 14px Barlow";
+    context.textAlign = "center";
+    context.fillText("Brake", centerX, centerY + radius + 24);
+    context.fillText("Accel", centerX, centerY - radius - 14);
+    context.fillText("L", centerX - radius - 16, centerY + 4);
+    context.fillText("R", centerX + radius + 16, centerY + 4);
+
+    this.lateralG.textContent = formatG(lateral);
+    this.longitudinalG.textContent = formatG(-longitudinal);
+    this.verticalG.textContent = formatG(vertical);
   }
 
   async refreshRuns(selectRunId = this.selectedRun?.id) {
@@ -151,6 +381,8 @@ export class TelemetryUI {
     this.runList.innerHTML = "";
 
     for (const run of runs) {
+      const rateSummary =
+        run.config?.sampleRateHz > 0 ? `${run.config.sampleRateHz} Hz` : "Unlimited rate";
       const card = document.createElement("button");
       card.className = `run-card${run.id === selectedId ? " active" : ""}`;
       card.type = "button";
@@ -161,6 +393,7 @@ export class TelemetryUI {
           <span>0-100 ${formatNumber(run.analysis?.zeroToHundredSeconds, 2, " s")}</span>
           <span>${formatDuration(run.duration)}</span>
           <span>${run.samples.length} samples</span>
+          <span>${rateSummary}</span>
         </div>
       `;
       card.addEventListener("click", () => this.renderRunDetails(run));
@@ -183,7 +416,7 @@ export class TelemetryUI {
         <article class="detail-stat"><span>0-100 km/h</span><strong>${formatNumber(run.analysis.zeroToHundredSeconds, 2, " s")}</strong></article>
         <article class="detail-stat"><span>Peak Accel</span><strong>${formatNumber(run.analysis.peakLongitudinalAcceleration, 2, " m/s^2")}</strong></article>
         <article class="detail-stat"><span>Peak Braking</span><strong>${formatNumber(run.analysis.peakBrakingDeceleration, 2, " m/s^2")}</strong></article>
-        <article class="detail-stat"><span>Samples</span><strong>${run.samples.length}</strong></article>
+        <article class="detail-stat"><span>Log Rate</span><strong>${formatLimit(run.config?.sampleRateHz ?? 0, "Hz")}</strong></article>
       </div>
       <section id="mapMount"></section>
       <section id="chartMount"></section>

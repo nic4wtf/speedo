@@ -9,6 +9,7 @@ const APP_ASSETS = [
   "./src/storage.js",
   "./src/analysis.js",
   "./src/charts.js",
+  "./src/imuview.js",
   "./src/mapview.js",
   "./src/recorder.js",
   "./src/sensors.js",

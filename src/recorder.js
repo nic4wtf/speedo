@@ -2,6 +2,10 @@ function buildRunId() {
   return `run-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
+function normalizeLimit(value) {
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 export class RunRecorder {
   constructor({ onLiveSpeed, onSampleCount, onStatus }) {
     this.onLiveSpeed = onLiveSpeed;
@@ -18,17 +22,28 @@ export class RunRecorder {
       accelY: null,
       accelZ: null,
     };
+    this.sampleIntervalMs = 0;
+    this.lastLoggedAt = 0;
   }
 
-  start() {
+  start(options = {}) {
     const now = performance.timeOrigin + performance.now();
+    const sampleRateHz = normalizeLimit(options.sampleRateHz);
+    const maxDurationSeconds = normalizeLimit(options.maxDurationSeconds);
+
     this.run = {
       id: buildRunId(),
       date: new Date().toISOString(),
       startedAt: now,
       duration: 0,
+      config: {
+        sampleRateHz,
+        maxDurationSeconds,
+      },
       samples: [],
     };
+    this.sampleIntervalMs = sampleRateHz > 0 ? 1000 / sampleRateHz : 0;
+    this.lastLoggedAt = 0;
     this.onStatus?.("recording", true);
     this.onSampleCount?.(0);
   }
@@ -56,6 +71,7 @@ export class RunRecorder {
       accelX: this.latestMotion.accelX,
       accelY: this.latestMotion.accelY,
       accelZ: this.latestMotion.accelZ,
+      source: "location",
     });
   }
 
@@ -77,11 +93,24 @@ export class RunRecorder {
       accelX: motion.accelX,
       accelY: motion.accelY,
       accelZ: motion.accelZ,
+      source: "motion",
     });
   }
 
   appendSample(sample) {
+    if (!this.run) {
+      return;
+    }
+
+    if (this.sampleIntervalMs > 0 && this.lastLoggedAt > 0) {
+      const elapsed = sample.timestamp - this.lastLoggedAt;
+      if (elapsed < this.sampleIntervalMs) {
+        return;
+      }
+    }
+
     this.run.samples.push(sample);
+    this.lastLoggedAt = sample.timestamp;
     this.onSampleCount?.(this.run.samples.length);
   }
 

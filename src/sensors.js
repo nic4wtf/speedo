@@ -4,28 +4,34 @@ export class SensorManager {
     this.onMotion = onMotion;
     this.onStatus = onStatus;
     this.geoWatchId = null;
+    this.motionActive = false;
     this.handleMotion = this.handleMotion.bind(this);
     this.motionPermissionGranted = false;
   }
 
-  async requestPermissions() {
+  async requestPermissions({ location = true, motion = true } = {}) {
     const issues = [];
 
-    if (!("geolocation" in navigator)) {
+    if (location && !("geolocation" in navigator)) {
       issues.push("Geolocation is not available in this browser.");
     }
 
-    if (typeof DeviceMotionEvent === "undefined") {
-      issues.push("Motion sensors are not available in this browser.");
-    } else if (typeof DeviceMotionEvent.requestPermission === "function") {
-      try {
-        const result = await DeviceMotionEvent.requestPermission();
-        this.motionPermissionGranted = result === "granted";
-      } catch (error) {
-        issues.push("Motion sensor permission was declined.");
+    if (motion) {
+      if (typeof DeviceMotionEvent === "undefined") {
+        issues.push("Motion sensors are not available in this browser.");
+      } else if (typeof DeviceMotionEvent.requestPermission === "function") {
+        try {
+          const result = await DeviceMotionEvent.requestPermission();
+          this.motionPermissionGranted = result === "granted";
+          if (!this.motionPermissionGranted) {
+            issues.push("Motion sensor permission was declined.");
+          }
+        } catch (error) {
+          issues.push("Motion sensor permission was declined.");
+        }
+      } else {
+        this.motionPermissionGranted = true;
       }
-    } else {
-      this.motionPermissionGranted = true;
     }
 
     return {
@@ -34,8 +40,8 @@ export class SensorManager {
     };
   }
 
-  start() {
-    if ("geolocation" in navigator) {
+  setStreams({ location = false, motion = false } = {}) {
+    if (location && this.geoWatchId == null && "geolocation" in navigator) {
       // Browsers choose the actual GNSS cadence, so we subscribe continuously and timestamp each update.
       this.geoWatchId = navigator.geolocation.watchPosition(
         (position) => {
@@ -66,17 +72,27 @@ export class SensorManager {
       );
     }
 
-    if (this.motionPermissionGranted) {
+    if (!location && this.geoWatchId != null) {
+      navigator.geolocation.clearWatch(this.geoWatchId);
+      this.geoWatchId = null;
+      this.onStatus?.("location", "Idle");
+    }
+
+    if (motion && !this.motionActive && this.motionPermissionGranted) {
       window.addEventListener("devicemotion", this.handleMotion);
+      this.motionActive = true;
+      this.onStatus?.("motion", "Live");
+    }
+
+    if (!motion && this.motionActive) {
+      window.removeEventListener("devicemotion", this.handleMotion);
+      this.motionActive = false;
+      this.onStatus?.("motion", "Idle");
     }
   }
 
-  stop() {
-    if (this.geoWatchId != null) {
-      navigator.geolocation.clearWatch(this.geoWatchId);
-      this.geoWatchId = null;
-    }
-    window.removeEventListener("devicemotion", this.handleMotion);
+  stopAll() {
+    this.setStreams({ location: false, motion: false });
   }
 
   handleMotion(event) {
@@ -91,6 +107,7 @@ export class SensorManager {
       accelY: acceleration.y,
       accelZ: acceleration.z,
       interval: event.interval,
+      includesGravity: !event.acceleration && Boolean(event.accelerationIncludingGravity),
     });
   }
 }

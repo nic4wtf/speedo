@@ -31,67 +31,170 @@
         <button id="installButton" class="secondary-button" hidden>Install</button>
       </header>
 
-      <main class="layout">
-        <section class="panel hero-panel">
-          <div class="speed-card">
-            <p class="eyebrow">Live Speed</p>
-            <div class="speed-value">
-              <span id="liveSpeed">0</span>
-              <span class="unit">km/h</span>
+      <nav class="tabbar" aria-label="Primary">
+        <button class="tab-button active" data-page="recorderPage" type="button">Recorder</button>
+        <button class="tab-button" data-page="runsPage" type="button">Runs</button>
+        <button class="tab-button" data-page="imuPage" type="button">IMU</button>
+      </nav>
+
+      <main>
+        <section id="recorderPage" class="page active">
+          <section class="panel live-panel">
+            <div class="live-stage">
+              <p class="eyebrow">Drive View</p>
+              <div class="speed-stack">
+                <div class="speed-value">
+                  <span id="liveSpeed">0</span>
+                  <span class="unit">km/h</span>
+                </div>
+                <p id="recordingState" class="status-pill idle">Ready to record</p>
+              </div>
+
+              <div class="gforce-stage">
+                <canvas id="gForceCanvas" class="gforce-canvas" width="260" height="260"></canvas>
+                <div class="gforce-grid">
+                  <article class="mini-stat">
+                    <span class="label">Sideways X</span>
+                    <strong id="lateralG">0.00 g</strong>
+                  </article>
+                  <article class="mini-stat">
+                    <span class="label">Forward Y</span>
+                    <strong id="longitudinalG">0.00 g</strong>
+                  </article>
+                  <article class="mini-stat">
+                    <span class="label">Vertical Z</span>
+                    <strong id="verticalG">0.00 g</strong>
+                  </article>
+                </div>
+              </div>
             </div>
-            <p id="recordingState" class="status-pill idle">Ready to record</p>
-          </div>
 
-          <div class="actions">
-            <button id="startButton" class="primary-button">Start Run</button>
-            <button id="stopButton" class="danger-button" disabled>Stop Run</button>
-          </div>
+            <div class="actions">
+              <button id="startButton" class="primary-button">Start Run</button>
+              <button id="stopButton" class="danger-button" disabled>Stop Run</button>
+            </div>
 
-          <div class="stat-grid">
-            <article class="mini-stat">
-              <span class="label">GNSS</span>
-              <strong id="locationStatus">Waiting</strong>
-            </article>
-            <article class="mini-stat">
-              <span class="label">Motion</span>
-              <strong id="motionStatus">Waiting</strong>
-            </article>
-            <article class="mini-stat">
-              <span class="label">Samples</span>
-              <strong id="sampleCount">0</strong>
-            </article>
-          </div>
+            <div class="stat-grid">
+              <article class="mini-stat">
+                <span class="label">GNSS</span>
+                <strong id="locationStatus">Idle</strong>
+              </article>
+              <article class="mini-stat">
+                <span class="label">Motion</span>
+                <strong id="motionStatus">Idle</strong>
+              </article>
+              <article class="mini-stat">
+                <span class="label">Samples</span>
+                <strong id="sampleCount">0</strong>
+              </article>
+              <article class="mini-stat">
+                <span class="label">Elapsed</span>
+                <strong id="elapsedValue">0:00</strong>
+              </article>
+            </div>
 
-          <div id="permissionMessage" class="callout" hidden></div>
+            <div id="permissionMessage" class="callout" hidden></div>
+          </section>
+
+          <section class="panel settings-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Recorder Limits</p>
+                <h2>Capture Settings</h2>
+              </div>
+            </div>
+
+            <div class="settings-grid">
+              <label class="field">
+                <span>Logging Rate (Hz)</span>
+                <input
+                  id="sampleRateInput"
+                  inputmode="decimal"
+                  placeholder="-, 0, 1, 5, 10"
+                  value="20"
+                />
+                <small>`0` or `-` means unrestricted logging.</small>
+              </label>
+              <label class="field">
+                <span>Max Recording Time (s)</span>
+                <input
+                  id="maxDurationInput"
+                  inputmode="numeric"
+                  placeholder="-, 0, 60, 180"
+                  value="0"
+                />
+                <small>`0` or `-` means unlimited duration.</small>
+              </label>
+            </div>
+
+            <div class="detail-grid">
+              <article class="detail-stat">
+                <span>Current Rate Limit</span>
+                <strong id="rateSummary">20 Hz</strong>
+              </article>
+              <article class="detail-stat">
+                <span>Current Max Time</span>
+                <strong id="durationSummary">Unlimited</strong>
+              </article>
+            </div>
+          </section>
         </section>
 
-        <section class="panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Saved Sessions</p>
-              <h2>Runs</h2>
-            </div>
-          </div>
-          <div id="runList" class="run-list empty-state">
-            <p>No runs yet. Record a session to start building telemetry history.</p>
+        <section id="runsPage" class="page">
+          <div class="runs-layout">
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Saved Sessions</p>
+                  <h2>Runs</h2>
+                </div>
+              </div>
+              <div id="runList" class="run-list empty-state">
+                <p>No runs yet. Record a session to start building telemetry history.</p>
+              </div>
+            </section>
+
+            <section class="panel details-panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Review</p>
+                  <h2 id="detailTitle">Run Analysis</h2>
+                </div>
+                <div class="detail-actions">
+                  <button id="exportJsonButton" class="secondary-button" disabled>Export JSON</button>
+                  <button id="exportCsvButton" class="secondary-button" disabled>Export CSV</button>
+                </div>
+              </div>
+
+              <div id="runDetails" class="details-empty">
+                <p>Select a run to inspect speed, acceleration, braking, and trajectory.</p>
+              </div>
+            </section>
           </div>
         </section>
 
-        <section class="panel details-panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Review</p>
-              <h2 id="detailTitle">Run Analysis</h2>
+        <section id="imuPage" class="page">
+          <section class="panel imu-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Phone Sensors</p>
+                <h2>IMU Monitor</h2>
+              </div>
+              <div class="detail-actions">
+                <button id="enableImuButton" class="secondary-button" type="button">
+                  Enable Live IMU
+                </button>
+                <button id="disableImuButton" class="secondary-button" type="button" disabled>
+                  Pause IMU
+                </button>
+              </div>
             </div>
-            <div class="detail-actions">
-              <button id="exportJsonButton" class="secondary-button" disabled>Export JSON</button>
-              <button id="exportCsvButton" class="secondary-button" disabled>Export CSV</button>
-            </div>
-          </div>
-
-          <div id="runDetails" class="details-empty">
-            <p>Select a run to inspect speed, acceleration, braking, and trajectory.</p>
-          </div>
+            <p class="imu-note">
+              Live IMU values are device-relative. Sideways is X, forward and braking is Y, and Z
+              is vertical through the phone body.
+            </p>
+            <div id="imuMount"></div>
+          </section>
         </section>
       </main>
     </div>

@@ -23,10 +23,13 @@ Then open the site in a modern mobile browser, ideally Android Chrome, and grant
 ## What the MVP includes
 
 - Run recording with geolocation and motion events
+- Configurable logging-rate cap and maximum recording time
 - IndexedDB persistence
 - Automatic run analysis
 - Map replay with Leaflet
 - Speed and acceleration charts with Chart.js
+- Live g-force circle with centered speed HUD during recording
+- Dedicated IMU page for phone sensor monitoring
 - JSON and CSV export
 - Installable PWA shell
 
