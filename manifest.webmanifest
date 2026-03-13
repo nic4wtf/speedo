@@ -1,0 +1,17 @@
+{
+  "name": "Telemetry Tracker",
+  "short_name": "Telemetry",
+  "description": "Mobile-first motorsport telemetry recorder for GNSS and accelerometer data.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#07131a",
+  "theme_color": "#10212b",
+  "icons": [
+    {
+      "src": "./assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
