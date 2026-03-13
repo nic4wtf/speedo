@@ -35,7 +35,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -92,7 +93,8 @@ button {
 .secondary-button,
 .primary-button,
 .danger-button,
-.field input {
+.field input,
+.field select {
   min-height: 54px;
   border-radius: 18px;
 }
@@ -298,6 +300,14 @@ button:not(:disabled):active {
   padding: 0.85rem 1rem;
 }
 
+.field select {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  padding: 0.85rem 1rem;
+}
+
 .field small {
   font-size: 0.8rem;
 }
@@ -349,6 +359,10 @@ button:not(:disabled):active {
   border-radius: 20px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.map-frame.compact-map {
+  min-height: 180px;
 }
 
 .chart-card {

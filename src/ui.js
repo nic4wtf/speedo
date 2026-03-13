@@ -74,8 +74,7 @@ export class TelemetryUI {
     this.bindEvents();
     this.registerPwa();
     this.updateSettingSummary();
-    this.refreshOrientationSummary();
-    this.drawGForceCircle(this.orientation.project(null));
+    this.handleMountSelectionChange();
     await this.refreshRuns();
   }
 
@@ -105,6 +104,8 @@ export class TelemetryUI {
     this.orientationSummary = document.getElementById("orientationSummary");
     this.calibrationStatus = document.getElementById("calibrationStatus");
     this.calibrateForwardButton = document.getElementById("calibrateForwardButton");
+    this.verticalAxisSelect = document.getElementById("verticalAxisSelect");
+    this.forwardAxisSelect = document.getElementById("forwardAxisSelect");
     this.lateralLabel = document.getElementById("lateralLabel");
     this.longitudinalLabel = document.getElementById("longitudinalLabel");
     this.verticalLabel = document.getElementById("verticalLabel");
@@ -128,6 +129,8 @@ export class TelemetryUI {
     this.maxDurationInput.addEventListener("input", () => this.updateSettingSummary());
     this.lapDistanceInput.addEventListener("input", () => this.updateSettingSummary());
     this.lapMinTimeInput.addEventListener("input", () => this.updateSettingSummary());
+    this.verticalAxisSelect.addEventListener("change", () => this.handleMountSelectionChange());
+    this.forwardAxisSelect.addEventListener("change", () => this.handleMountSelectionChange());
     this.enableImuButton.addEventListener("click", () => this.handleEnableImu());
     this.disableImuButton.addEventListener("click", () => this.handleDisableImu());
     this.calibrateForwardButton.addEventListener("click", () => this.handleStartCalibration());
@@ -197,10 +200,17 @@ export class TelemetryUI {
     this.orientationSummary.textContent = `${status.mode} (${status.upLabel}, ${status.forwardLabel})`;
     this.calibrationStatus.textContent = status.calibrating
       ? "Calibrating now"
-      : this.orientation.manualForward
+      : this.orientation.calibratedForward
         ? "Forward axis calibrated"
         : "Waiting for auto-detect";
     this.calibrationStatus.className = `status-pill ${status.calibrating ? "recording" : "idle"}`;
+  }
+
+  handleMountSelectionChange() {
+    this.orientation.setVerticalPreference(this.verticalAxisSelect.value);
+    this.orientation.setForwardPreference(this.forwardAxisSelect.value);
+    this.refreshOrientationSummary();
+    this.drawGForceCircle(this.orientation.project(null));
   }
 
   async handleStartRun() {
@@ -308,22 +318,16 @@ export class TelemetryUI {
   }
 
   handleLocation(payload) {
-    this.orientation.ingestLocation(payload);
     this.recorder.ingestLocation(payload);
   }
 
   handleMotion(payload) {
-    const wasCalibrating = this.orientation.getStatus().calibrating;
     this.orientation.ingestMotion(payload);
     const projection = this.orientation.project(payload);
     this.refreshOrientationSummary();
     this.drawGForceCircle(projection);
     this.imuView.update(payload);
     this.recorder.ingestMotion(payload);
-
-    if (wasCalibrating && !this.orientation.getStatus().calibrating) {
-      this.completeCalibration();
-    }
   }
 
   completeCalibration() {
@@ -496,6 +500,7 @@ export class TelemetryUI {
     const lapMarkup =
       run.analysis.laps.length > 0
         ? `
+          <section id="contextMapMount"></section>
           <section class="lap-list">
             ${run.analysis.laps
               .map(
@@ -509,7 +514,7 @@ export class TelemetryUI {
               .join("")}
           </section>
         `
-        : '<div class="details-empty"><p>No automatic laps detected for this run.</p></div>';
+        : '<section id="contextMapMount"></section><div class="details-empty"><p>No automatic laps detected for this run.</p></div>';
 
     this.runDetails.innerHTML = `
       <div class="detail-grid">
@@ -523,13 +528,12 @@ export class TelemetryUI {
         <article class="detail-stat"><span>Laps</span><strong>${run.analysis.lapCount}</strong></article>
       </div>
       ${lapMarkup}
-      <section id="mapMount"></section>
       <section id="chartMount"></section>
     `;
 
     this.renderRunListFromCurrentSelection(run.id);
-    this.mapView = new MapView(document.getElementById("mapMount"));
-    this.mapView.render(run.samples);
+    this.mapView = new MapView(document.getElementById("contextMapMount"));
+    this.mapView.render(run.samples, { compact: true });
     this.charts = new RunCharts(document.getElementById("chartMount"));
     this.charts.render(run.analysis.derived);
   }

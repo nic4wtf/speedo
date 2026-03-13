@@ -162,8 +162,37 @@
               </article>
               <article class="detail-stat">
                 <span>Mount Orientation</span>
-                <strong id="orientationSummary">Auto mount estimate</strong>
+                <strong id="orientationSummary">Auto vertical / default forward</strong>
               </article>
+            </div>
+
+            <div class="settings-grid">
+              <label class="field">
+                <span>Mount Up Axis</span>
+                <select id="verticalAxisSelect">
+                  <option value="auto">Auto detect</option>
+                  <option value="x+">X+</option>
+                  <option value="x-">X-</option>
+                  <option value="y+">Y+</option>
+                  <option value="y-">Y-</option>
+                  <option value="z+">Z+</option>
+                  <option value="z-">Z-</option>
+                </select>
+                <small>Use manual up-axis if the automatic vertical guess is wrong.</small>
+              </label>
+              <label class="field">
+                <span>Forward Axis</span>
+                <select id="forwardAxisSelect">
+                  <option value="auto">Default / calibrated</option>
+                  <option value="x+">X+</option>
+                  <option value="x-">X-</option>
+                  <option value="y+">Y+</option>
+                  <option value="y-">Y-</option>
+                  <option value="z+">Z+</option>
+                  <option value="z-">Z-</option>
+                </select>
+                <small>Leave on auto and use calibrate, or set the forward axis manually.</small>
+              </label>
             </div>
 
             <div class="detail-actions">

@@ -5,10 +5,15 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function dominantAxis(vector) {
-  return AXIS_KEYS.reduce((best, key) =>
-    Math.abs(vector[key] ?? 0) > Math.abs(vector[best] ?? 0) ? key : best,
-  );
+function parseAxisSelection(selection) {
+  if (!selection || selection === "auto") {
+    return null;
+  }
+
+  return {
+    axis: selection[0],
+    sign: selection[1] === "-" ? -1 : 1,
+  };
 }
 
 function otherAxes(excludedKey) {
@@ -19,6 +24,12 @@ function axisValue(motion, axis) {
   return motion?.[`accel${axis.toUpperCase()}`] ?? 0;
 }
 
+function dominantAxis(vector) {
+  return AXIS_KEYS.reduce((best, key) =>
+    Math.abs(vector[key] ?? 0) > Math.abs(vector[best] ?? 0) ? key : best,
+  );
+}
+
 export class MountOrientation {
   constructor() {
     this.reset();
@@ -26,38 +37,27 @@ export class MountOrientation {
 
   reset() {
     this.gravityVector = { x: 0, y: 0, z: GRAVITY };
-    this.verticalAxis = "z";
-    this.verticalSign = 1;
-    this.forwardAxis = "y";
-    this.forwardSign = 1;
-    this.forwardScores = { x: 0, y: 0, z: 0 };
-    this.manualForward = null;
-    this.currentSpeedSlope = 0;
-    this.lastSpeed = null;
-    this.lastSpeedTimestamp = null;
+    this.autoVertical = { axis: "z", sign: 1 };
+    this.verticalPreference = "auto";
+    this.forwardPreference = "auto";
+    this.calibratedForward = null;
     this.calibration = {
       active: false,
-      startedAt: 0,
-      durationMs: 3000,
       accumulator: { x: 0, y: 0, z: 0 },
       count: 0,
     };
   }
 
-  ingestLocation(location) {
-    if (!Number.isFinite(location?.speed)) {
-      return;
-    }
+  setVerticalPreference(selection) {
+    this.verticalPreference = selection || "auto";
+  }
 
-    if (this.lastSpeed != null && this.lastSpeedTimestamp != null) {
-      const dt = (location.timestamp - this.lastSpeedTimestamp) / 1000;
-      if (dt > 0) {
-        this.currentSpeedSlope = (location.speed - this.lastSpeed) / dt;
-      }
-    }
+  setForwardPreference(selection) {
+    this.forwardPreference = selection || "auto";
+  }
 
-    this.lastSpeed = location.speed;
-    this.lastSpeedTimestamp = location.timestamp;
+  ingestLocation() {
+    // Forward calibration is motion-driven for now, so location is not needed here.
   }
 
   ingestMotion(motion) {
@@ -66,7 +66,7 @@ export class MountOrientation {
       Number.isFinite(motion?.gravityY) &&
       Number.isFinite(motion?.gravityZ)
     ) {
-      const alpha = 0.08;
+      const alpha = 0.06;
       this.gravityVector.x =
         (1 - alpha) * this.gravityVector.x + alpha * clamp(motion.gravityX, -20, 20);
       this.gravityVector.y =
@@ -74,60 +74,37 @@ export class MountOrientation {
       this.gravityVector.z =
         (1 - alpha) * this.gravityVector.z + alpha * clamp(motion.gravityZ, -20, 20);
 
-      this.verticalAxis = dominantAxis(this.gravityVector);
-      this.verticalSign = Math.sign(this.gravityVector[this.verticalAxis] || 1);
+      const axis = dominantAxis(this.gravityVector);
+      const sign = Math.sign(this.gravityVector[axis] || 1) || 1;
+      this.autoVertical = { axis, sign };
     }
 
-    const horizontalAxes = otherAxes(this.verticalAxis);
-    const speedSlope = this.currentSpeedSlope;
+    if (!this.calibration.active) {
+      return;
+    }
 
+    const verticalAxis = this.getVertical().axis;
+    const horizontalAxes = otherAxes(verticalAxis);
     for (const axis of horizontalAxes) {
-      const value = axisValue(motion, axis);
-      const weightedMagnitude = Math.abs(value);
-      this.forwardScores[axis] = this.forwardScores[axis] * 0.98 + weightedMagnitude;
-
-      if (Math.abs(speedSlope) > 0.12) {
-        this.forwardScores[axis] += value * speedSlope * 0.2;
-      }
+      this.calibration.accumulator[axis] += axisValue(motion, axis);
     }
-
-    if (this.calibration.active) {
-      for (const axis of horizontalAxes) {
-        this.calibration.accumulator[axis] += axisValue(motion, axis);
-      }
-      this.calibration.count += 1;
-    }
-
-    if (!this.manualForward) {
-      this.updateAutomaticForwardAxis(horizontalAxes);
-    }
-  }
-
-  updateAutomaticForwardAxis(horizontalAxes) {
-    const forwardAxis = horizontalAxes.reduce((best, axis) =>
-      Math.abs(this.forwardScores[axis]) > Math.abs(this.forwardScores[best]) ? axis : best,
-    );
-
-    this.forwardAxis = forwardAxis;
-    const signedScore = this.forwardScores[forwardAxis];
-    this.forwardSign = signedScore === 0 ? 1 : Math.sign(signedScore);
+    this.calibration.count += 1;
   }
 
   startCalibration() {
     this.calibration = {
       active: true,
-      startedAt: performance.timeOrigin + performance.now(),
-      durationMs: 3000,
       accumulator: { x: 0, y: 0, z: 0 },
       count: 0,
     };
   }
 
   finishCalibration() {
+    const verticalAxis = this.getVertical().axis;
+    const horizontalAxes = otherAxes(verticalAxis);
     const sampleCount = this.calibration.count;
     this.calibration.active = false;
 
-    const horizontalAxes = otherAxes(this.verticalAxis);
     if (sampleCount === 0) {
       return false;
     }
@@ -137,48 +114,70 @@ export class MountOrientation {
       averages[axis] = this.calibration.accumulator[axis] / sampleCount;
     }
 
-    this.calibration.accumulator = { x: 0, y: 0, z: 0 };
-    this.calibration.count = 0;
-
     const forwardAxis = horizontalAxes.reduce((best, axis) =>
       Math.abs(averages[axis]) > Math.abs(averages[best]) ? axis : best,
     );
+    const forwardSign = Math.sign(averages[forwardAxis] || 1) || 1;
 
-    const forwardSign = Math.sign(averages[forwardAxis] || 1);
-    this.manualForward = {
+    this.calibratedForward = {
       axis: forwardAxis,
-      sign: forwardSign || 1,
+      sign: forwardSign,
     };
-    this.forwardAxis = this.manualForward.axis;
-    this.forwardSign = this.manualForward.sign;
+    this.calibration.accumulator = { x: 0, y: 0, z: 0 };
+    this.calibration.count = 0;
     return true;
   }
 
+  getVertical() {
+    return parseAxisSelection(this.verticalPreference) ?? this.autoVertical;
+  }
+
+  getForward() {
+    const verticalAxis = this.getVertical().axis;
+    const manualForward = parseAxisSelection(this.forwardPreference);
+    if (manualForward && manualForward.axis !== verticalAxis) {
+      return manualForward;
+    }
+
+    if (this.calibratedForward && this.calibratedForward.axis !== verticalAxis) {
+      return this.calibratedForward;
+    }
+
+    const fallbackAxis = otherAxes(verticalAxis)[0] ?? "y";
+    return { axis: fallbackAxis, sign: 1 };
+  }
+
   getStatus() {
-    const mode = this.manualForward ? "Manual forward calibrated" : "Auto mount estimate";
-    const upLabel = `${this.verticalAxis.toUpperCase()} ${this.verticalSign > 0 ? "+" : "-"}`;
-    const forwardLabel = `${this.forwardAxis.toUpperCase()} ${this.forwardSign > 0 ? "+" : "-"}`;
+    const vertical = this.getVertical();
+    const forward = this.getForward();
+    const verticalMode = this.verticalPreference === "auto" ? "Auto vertical" : "Manual vertical";
+    const forwardMode =
+      this.forwardPreference !== "auto"
+        ? "manual forward"
+        : this.calibratedForward
+          ? "calibrated forward"
+          : "default forward";
 
     return {
-      mode,
-      upLabel,
-      forwardLabel,
+      mode: `${verticalMode} / ${forwardMode}`,
+      upLabel: `${vertical.axis.toUpperCase()} ${vertical.sign > 0 ? "+" : "-"}`,
+      forwardLabel: `${forward.axis.toUpperCase()} ${forward.sign > 0 ? "+" : "-"}`,
       calibrating: this.calibration.active,
     };
   }
 
   project(motion) {
-    const verticalAxis = this.verticalAxis;
-    const forwardAxis = this.forwardAxis;
-    const lateralAxis = otherAxes(verticalAxis).find((axis) => axis !== forwardAxis) ?? "x";
+    const vertical = this.getVertical();
+    const forward = this.getForward();
+    const lateralAxis = otherAxes(vertical.axis).find((axis) => axis !== forward.axis) ?? "x";
 
     return {
       lateralG: axisValue(motion, lateralAxis) / GRAVITY,
-      longitudinalG: (axisValue(motion, forwardAxis) * this.forwardSign) / GRAVITY,
-      verticalG: (axisValue(motion, verticalAxis) * this.verticalSign) / GRAVITY,
+      longitudinalG: (axisValue(motion, forward.axis) * forward.sign) / GRAVITY,
+      verticalG: (axisValue(motion, vertical.axis) * vertical.sign) / GRAVITY,
       lateralAxis,
-      longitudinalAxis: forwardAxis,
-      verticalAxis,
+      longitudinalAxis: forward.axis,
+      verticalAxis: vertical.axis,
     };
   }
 }
