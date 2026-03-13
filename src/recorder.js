@@ -30,6 +30,8 @@ export class RunRecorder {
     const now = performance.timeOrigin + performance.now();
     const sampleRateHz = normalizeLimit(options.sampleRateHz);
     const maxDurationSeconds = normalizeLimit(options.maxDurationSeconds);
+    const lapDistanceMeters = normalizeLimit(options.lapDistanceMeters);
+    const lapMinSeconds = normalizeLimit(options.lapMinSeconds);
 
     this.run = {
       id: buildRunId(),
@@ -39,6 +41,8 @@ export class RunRecorder {
       config: {
         sampleRateHz,
         maxDurationSeconds,
+        lapDistanceMeters,
+        lapMinSeconds,
       },
       samples: [],
     };

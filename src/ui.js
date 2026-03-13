@@ -2,11 +2,10 @@ import { analyzeRun, formatDuration, formatNumber, runToCsv } from "./analysis.j
 import { RunCharts } from "./charts.js";
 import { IMUView } from "./imuview.js";
 import { MapView } from "./mapview.js";
+import { MountOrientation } from "./orientation.js";
 import { RunRecorder } from "./recorder.js";
 import { SensorManager } from "./sensors.js";
 import { RunStorage } from "./storage.js";
-
-const GRAVITY = 9.80665;
 
 function downloadBlob(filename, content, mimeType) {
   const blob = new Blob([content], { type: mimeType });
@@ -43,6 +42,7 @@ function formatG(value) {
 export class TelemetryUI {
   constructor() {
     this.storage = new RunStorage();
+    this.orientation = new MountOrientation();
     this.recorder = new RunRecorder({
       onLiveSpeed: (speed) => this.updateLiveSpeed(speed),
       onSampleCount: (count) => {
@@ -65,6 +65,7 @@ export class TelemetryUI {
     this.imuStreaming = false;
     this.elapsedTimer = null;
     this.maxDurationTimer = null;
+    this.calibrationTimer = null;
   }
 
   async init() {
@@ -73,7 +74,8 @@ export class TelemetryUI {
     this.bindEvents();
     this.registerPwa();
     this.updateSettingSummary();
-    this.drawGForceCircle();
+    this.refreshOrientationSummary();
+    this.drawGForceCircle(this.orientation.project(null));
     await this.refreshRuns();
   }
 
@@ -95,8 +97,17 @@ export class TelemetryUI {
     this.installButton = document.getElementById("installButton");
     this.sampleRateInput = document.getElementById("sampleRateInput");
     this.maxDurationInput = document.getElementById("maxDurationInput");
+    this.lapDistanceInput = document.getElementById("lapDistanceInput");
+    this.lapMinTimeInput = document.getElementById("lapMinTimeInput");
     this.rateSummary = document.getElementById("rateSummary");
     this.durationSummary = document.getElementById("durationSummary");
+    this.lapSummary = document.getElementById("lapSummary");
+    this.orientationSummary = document.getElementById("orientationSummary");
+    this.calibrationStatus = document.getElementById("calibrationStatus");
+    this.calibrateForwardButton = document.getElementById("calibrateForwardButton");
+    this.lateralLabel = document.getElementById("lateralLabel");
+    this.longitudinalLabel = document.getElementById("longitudinalLabel");
+    this.verticalLabel = document.getElementById("verticalLabel");
     this.lateralG = document.getElementById("lateralG");
     this.longitudinalG = document.getElementById("longitudinalG");
     this.verticalG = document.getElementById("verticalG");
@@ -115,8 +126,11 @@ export class TelemetryUI {
     this.exportCsvButton.addEventListener("click", () => this.exportRun("csv"));
     this.sampleRateInput.addEventListener("input", () => this.updateSettingSummary());
     this.maxDurationInput.addEventListener("input", () => this.updateSettingSummary());
+    this.lapDistanceInput.addEventListener("input", () => this.updateSettingSummary());
+    this.lapMinTimeInput.addEventListener("input", () => this.updateSettingSummary());
     this.enableImuButton.addEventListener("click", () => this.handleEnableImu());
     this.disableImuButton.addEventListener("click", () => this.handleDisableImu());
+    this.calibrateForwardButton.addEventListener("click", () => this.handleStartCalibration());
 
     for (const button of this.tabButtons) {
       button.addEventListener("click", () => this.showPage(button.dataset.page));
@@ -163,6 +177,8 @@ export class TelemetryUI {
     return {
       sampleRateHz: parseLimitValue(this.sampleRateInput.value),
       maxDurationSeconds: parseLimitValue(this.maxDurationInput.value),
+      lapDistanceMeters: parseLimitValue(this.lapDistanceInput.value),
+      lapMinSeconds: parseLimitValue(this.lapMinTimeInput.value),
     };
   }
 
@@ -170,6 +186,21 @@ export class TelemetryUI {
     const options = this.getRecorderOptions();
     this.rateSummary.textContent = formatLimit(options.sampleRateHz, "Hz");
     this.durationSummary.textContent = formatLimit(options.maxDurationSeconds, "s");
+    this.lapSummary.textContent =
+      options.lapDistanceMeters > 0 && options.lapMinSeconds > 0
+        ? `${options.lapDistanceMeters} m / ${options.lapMinSeconds} s`
+        : "Disabled";
+  }
+
+  refreshOrientationSummary() {
+    const status = this.orientation.getStatus();
+    this.orientationSummary.textContent = `${status.mode} (${status.upLabel}, ${status.forwardLabel})`;
+    this.calibrationStatus.textContent = status.calibrating
+      ? "Calibrating now"
+      : this.orientation.manualForward
+        ? "Forward axis calibrated"
+        : "Waiting for auto-detect";
+    this.calibrationStatus.className = `status-pill ${status.calibrating ? "recording" : "idle"}`;
   }
 
   async handleStartRun() {
@@ -238,6 +269,31 @@ export class TelemetryUI {
     this.syncSensors();
   }
 
+  async handleStartCalibration() {
+    const permissions = await this.sensors.requestPermissions({ location: false, motion: true });
+    if (!permissions.ok) {
+      this.showPermissionMessage(permissions.issues.join(" "));
+      return;
+    }
+
+    if (!this.recordingActive) {
+      this.imuStreaming = true;
+      this.syncSensors();
+    }
+
+    this.orientation.startCalibration();
+    if (this.calibrationTimer) {
+      window.clearTimeout(this.calibrationTimer);
+    }
+    this.calibrationTimer = window.setTimeout(() => {
+      this.completeCalibration();
+    }, 3400);
+    this.refreshOrientationSummary();
+    this.showPermissionMessage(
+      "Forward calibration started. Accelerate straight forward for about 3 seconds.",
+    );
+  }
+
   updateImuButtons() {
     this.enableImuButton.disabled = this.imuStreaming;
     this.disableImuButton.disabled = !this.imuStreaming;
@@ -252,13 +308,37 @@ export class TelemetryUI {
   }
 
   handleLocation(payload) {
+    this.orientation.ingestLocation(payload);
     this.recorder.ingestLocation(payload);
   }
 
   handleMotion(payload) {
-    this.drawGForceCircle(payload);
+    const wasCalibrating = this.orientation.getStatus().calibrating;
+    this.orientation.ingestMotion(payload);
+    const projection = this.orientation.project(payload);
+    this.refreshOrientationSummary();
+    this.drawGForceCircle(projection);
     this.imuView.update(payload);
     this.recorder.ingestMotion(payload);
+
+    if (wasCalibrating && !this.orientation.getStatus().calibrating) {
+      this.completeCalibration();
+    }
+  }
+
+  completeCalibration() {
+    if (this.calibrationTimer) {
+      window.clearTimeout(this.calibrationTimer);
+      this.calibrationTimer = null;
+    }
+
+    const updated = this.orientation.finishCalibration();
+    this.refreshOrientationSummary();
+    this.showPermissionMessage(
+      updated
+        ? "Forward calibration complete."
+        : "Calibration finished, but there was not enough straight-line acceleration to lock a forward axis.",
+    );
   }
 
   startElapsedTimer() {
@@ -297,16 +377,16 @@ export class TelemetryUI {
     }
   }
 
-  drawGForceCircle(motion = null) {
+  drawGForceCircle(projection) {
     const context = this.gForceCanvas.getContext("2d");
     const width = this.gForceCanvas.width;
     const height = this.gForceCanvas.height;
     const centerX = width / 2;
     const centerY = height / 2;
     const radius = Math.min(width, height) * 0.34;
-    const lateral = (motion?.accelX ?? 0) / GRAVITY;
-    const longitudinal = -((motion?.accelY ?? 0) / GRAVITY);
-    const vertical = (motion?.accelZ ?? 0) / GRAVITY;
+    const lateral = projection?.lateralG ?? 0;
+    const longitudinal = -(projection?.longitudinalG ?? 0);
+    const vertical = projection?.verticalG ?? 0;
     const scale = radius / 1.6;
     const pointX = centerX + Math.max(-1.6, Math.min(1.6, lateral)) * scale;
     const pointY = centerY + Math.max(-1.6, Math.min(1.6, longitudinal)) * scale;
@@ -347,6 +427,9 @@ export class TelemetryUI {
     context.fillText("L", centerX - radius - 16, centerY + 4);
     context.fillText("R", centerX + radius + 16, centerY + 4);
 
+    this.lateralLabel.textContent = `Sideways (${projection?.lateralAxis?.toUpperCase() ?? "?"})`;
+    this.longitudinalLabel.textContent = `Forward (${projection?.longitudinalAxis?.toUpperCase() ?? "?"})`;
+    this.verticalLabel.textContent = `Vertical (${projection?.verticalAxis?.toUpperCase() ?? "?"})`;
     this.lateralG.textContent = formatG(lateral);
     this.longitudinalG.textContent = formatG(-longitudinal);
     this.verticalG.textContent = formatG(vertical);
@@ -383,6 +466,8 @@ export class TelemetryUI {
     for (const run of runs) {
       const rateSummary =
         run.config?.sampleRateHz > 0 ? `${run.config.sampleRateHz} Hz` : "Unlimited rate";
+      const lapSummary =
+        run.analysis?.lapCount > 0 ? `${run.analysis.lapCount} laps` : "No laps detected";
       const card = document.createElement("button");
       card.className = `run-card${run.id === selectedId ? " active" : ""}`;
       card.type = "button";
@@ -394,6 +479,7 @@ export class TelemetryUI {
           <span>${formatDuration(run.duration)}</span>
           <span>${run.samples.length} samples</span>
           <span>${rateSummary}</span>
+          <span>${lapSummary}</span>
         </div>
       `;
       card.addEventListener("click", () => this.renderRunDetails(run));
@@ -407,6 +493,24 @@ export class TelemetryUI {
     this.exportJsonButton.disabled = false;
     this.exportCsvButton.disabled = false;
 
+    const lapMarkup =
+      run.analysis.laps.length > 0
+        ? `
+          <section class="lap-list">
+            ${run.analysis.laps
+              .map(
+                (lap) => `
+                  <article class="lap-row">
+                    <span>Lap ${lap.lapNumber}</span>
+                    <strong>${formatNumber(lap.durationSeconds, 2, " s")}</strong>
+                  </article>
+                `,
+              )
+              .join("")}
+          </section>
+        `
+        : '<div class="details-empty"><p>No automatic laps detected for this run.</p></div>';
+
     this.runDetails.innerHTML = `
       <div class="detail-grid">
         <article class="detail-stat"><span>Duration</span><strong>${formatDuration(run.duration)}</strong></article>
@@ -416,8 +520,9 @@ export class TelemetryUI {
         <article class="detail-stat"><span>0-100 km/h</span><strong>${formatNumber(run.analysis.zeroToHundredSeconds, 2, " s")}</strong></article>
         <article class="detail-stat"><span>Peak Accel</span><strong>${formatNumber(run.analysis.peakLongitudinalAcceleration, 2, " m/s^2")}</strong></article>
         <article class="detail-stat"><span>Peak Braking</span><strong>${formatNumber(run.analysis.peakBrakingDeceleration, 2, " m/s^2")}</strong></article>
-        <article class="detail-stat"><span>Log Rate</span><strong>${formatLimit(run.config?.sampleRateHz ?? 0, "Hz")}</strong></article>
+        <article class="detail-stat"><span>Laps</span><strong>${run.analysis.lapCount}</strong></article>
       </div>
+      ${lapMarkup}
       <section id="mapMount"></section>
       <section id="chartMount"></section>
     `;

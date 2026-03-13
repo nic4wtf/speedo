@@ -96,16 +96,20 @@ export class SensorManager {
   }
 
   handleMotion(event) {
-    const acceleration = event.acceleration ?? event.accelerationIncludingGravity;
-    if (!acceleration) {
+    const linear = event.acceleration ?? event.accelerationIncludingGravity;
+    const gravity = event.accelerationIncludingGravity ?? event.acceleration;
+    if (!linear) {
       return;
     }
     this.onStatus?.("motion", "Live");
     this.onMotion?.({
       timestamp: performance.timeOrigin + performance.now(),
-      accelX: acceleration.x,
-      accelY: acceleration.y,
-      accelZ: acceleration.z,
+      accelX: linear.x,
+      accelY: linear.y,
+      accelZ: linear.z,
+      gravityX: gravity?.x ?? null,
+      gravityY: gravity?.y ?? null,
+      gravityZ: gravity?.z ?? null,
       interval: event.interval,
       includesGravity: !event.acceleration && Boolean(event.accelerationIncludingGravity),
     });

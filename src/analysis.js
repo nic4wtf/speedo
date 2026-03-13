@@ -23,6 +23,70 @@ function numericValues(values) {
   return values.filter((value) => Number.isFinite(value));
 }
 
+function detectLaps(samples, config = {}) {
+  const distanceThresholdMeters =
+    Number.isFinite(config.lapDistanceMeters) && config.lapDistanceMeters > 0
+      ? config.lapDistanceMeters
+      : 0;
+  const minLapSeconds =
+    Number.isFinite(config.lapMinSeconds) && config.lapMinSeconds > 0 ? config.lapMinSeconds : 0;
+
+  if (!distanceThresholdMeters || !minLapSeconds) {
+    return [];
+  }
+
+  const validSamples = samples
+    .map((sample, index) => ({ ...sample, sampleIndex: index }))
+    .filter((sample) => sample.lat != null && sample.lon != null);
+
+  if (validSamples.length < 2) {
+    return [];
+  }
+
+  const minLapMs = minLapSeconds * 1000;
+  const runStart = validSamples[0].timestamp;
+  const laps = [];
+  let lapStartTimestamp = validSamples[0].timestamp;
+
+  for (let index = 1; index < validSamples.length; index += 1) {
+    const current = validSamples[index];
+
+    if (current.timestamp - lapStartTimestamp < minLapMs) {
+      continue;
+    }
+
+    let match = null;
+    for (let previousIndex = 0; previousIndex < index; previousIndex += 1) {
+      const previous = validSamples[previousIndex];
+      if (current.timestamp - previous.timestamp < minLapMs) {
+        continue;
+      }
+
+      if (haversineDistanceMeters(current, previous) <= distanceThresholdMeters) {
+        match = previous;
+        break;
+      }
+    }
+
+    if (!match) {
+      continue;
+    }
+
+    const durationSeconds = (current.timestamp - lapStartTimestamp) / 1000;
+    laps.push({
+      lapNumber: laps.length + 1,
+      startTime: (lapStartTimestamp - runStart) / 1000,
+      endTime: (current.timestamp - runStart) / 1000,
+      durationSeconds,
+      crossingDistanceMeters: haversineDistanceMeters(current, match),
+      sampleIndex: current.sampleIndex,
+    });
+    lapStartTimestamp = current.timestamp;
+  }
+
+  return laps;
+}
+
 function buildDerivedSeries(samples) {
   if (!samples.length) {
     return [];
@@ -59,6 +123,7 @@ function buildDerivedSeries(samples) {
 export function analyzeRun(run) {
   const samples = run.samples ?? [];
   const derived = buildDerivedSeries(samples);
+  const laps = detectLaps(samples, run.config);
   const speedValues = numericValues(samples.map((sample) => sample.speed));
   // Distance is reconstructed from GNSS points so it still works if browser speed is noisy.
   const distance = samples.reduce((total, sample, index) => {
@@ -94,6 +159,8 @@ export function analyzeRun(run) {
       peakLongitudinalAcceleration:
         accelerationSeries.length ? Math.max(...accelerationSeries) : 0,
       peakBrakingDeceleration: accelerationSeries.length ? Math.min(...accelerationSeries) : 0,
+      lapCount: laps.length,
+      laps,
       derived,
     },
   };

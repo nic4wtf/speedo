@@ -26,9 +26,12 @@ export class RunCharts {
     `;
 
     const labels = derivedSamples.map((item) => item.time.toFixed(1));
+    const speedCanvas = this.container.querySelector("#speedChart");
+    const accelCanvas = this.container.querySelector("#accelChart");
     const chartOptions = {
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
       interaction: {
         intersect: false,
         mode: "index",
@@ -52,7 +55,7 @@ export class RunCharts {
       },
     };
 
-    this.speedChart = new Chart(document.getElementById("speedChart"), {
+    this.speedChart = new Chart(speedCanvas, {
       type: "line",
       data: {
         labels,
@@ -71,13 +74,13 @@ export class RunCharts {
       options: chartOptions,
     });
 
-    this.accelChart = new Chart(document.getElementById("accelChart"), {
+    this.accelChart = new Chart(accelCanvas, {
       type: "line",
       data: {
         labels,
         datasets: [
           {
-            label: "m/s²",
+            label: "m/s^2",
             data: derivedSamples.map((item) => item.acceleration),
             borderColor: "#ffd36c",
             backgroundColor: "rgba(255,211,108,0.16)",

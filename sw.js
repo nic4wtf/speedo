@@ -11,6 +11,7 @@ const APP_ASSETS = [
   "./src/charts.js",
   "./src/imuview.js",
   "./src/mapview.js",
+  "./src/orientation.js",
   "./src/recorder.js",
   "./src/sensors.js",
   "./src/ui.js",

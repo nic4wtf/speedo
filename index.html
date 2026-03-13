@@ -54,15 +54,15 @@
                 <canvas id="gForceCanvas" class="gforce-canvas" width="260" height="260"></canvas>
                 <div class="gforce-grid">
                   <article class="mini-stat">
-                    <span class="label">Sideways X</span>
+                    <span class="label" id="lateralLabel">Sideways</span>
                     <strong id="lateralG">0.00 g</strong>
                   </article>
                   <article class="mini-stat">
-                    <span class="label">Forward Y</span>
+                    <span class="label" id="longitudinalLabel">Forward</span>
                     <strong id="longitudinalG">0.00 g</strong>
                   </article>
                   <article class="mini-stat">
-                    <span class="label">Vertical Z</span>
+                    <span class="label" id="verticalLabel">Vertical</span>
                     <strong id="verticalG">0.00 g</strong>
                   </article>
                 </div>
@@ -125,6 +125,26 @@
                 />
                 <small>`0` or `-` means unlimited duration.</small>
               </label>
+              <label class="field">
+                <span>Lap Radius X (m)</span>
+                <input
+                  id="lapDistanceInput"
+                  inputmode="decimal"
+                  placeholder="0, 10, 20"
+                  value="20"
+                />
+                <small>Detect a lap when the car returns within this distance.</small>
+              </label>
+              <label class="field">
+                <span>Lap Min Time Y (s)</span>
+                <input
+                  id="lapMinTimeInput"
+                  inputmode="decimal"
+                  placeholder="0, 15, 30"
+                  value="30"
+                />
+                <small>Ignore same-area returns until this many seconds have passed.</small>
+              </label>
             </div>
 
             <div class="detail-grid">
@@ -136,6 +156,21 @@
                 <span>Current Max Time</span>
                 <strong id="durationSummary">Unlimited</strong>
               </article>
+              <article class="detail-stat">
+                <span>Lap Detection</span>
+                <strong id="lapSummary">20 m / 30 s</strong>
+              </article>
+              <article class="detail-stat">
+                <span>Mount Orientation</span>
+                <strong id="orientationSummary">Auto mount estimate</strong>
+              </article>
+            </div>
+
+            <div class="detail-actions">
+              <button id="calibrateForwardButton" class="secondary-button" type="button">
+                Calibrate Forward
+              </button>
+              <span id="calibrationStatus" class="status-pill idle">Waiting for auto-detect</span>
             </div>
           </section>
         </section>
