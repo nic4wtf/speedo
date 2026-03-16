@@ -58,6 +58,7 @@ export class TelemetryUI {
 
     this.deferredPrompt = null;
     this.selectedRun = null;
+    this.runs = [];
     this.mapView = null;
     this.charts = null;
     this.imuView = null;
@@ -65,6 +66,7 @@ export class TelemetryUI {
     this.imuStreaming = false;
     this.elapsedTimer = null;
     this.maxDurationTimer = null;
+    this.mountCaptureTimer = null;
     this.calibrationTimer = null;
   }
 
@@ -74,7 +76,8 @@ export class TelemetryUI {
     this.bindEvents();
     this.registerPwa();
     this.updateSettingSummary();
-    this.handleMountSelectionChange();
+    this.refreshOrientationSummary();
+    this.drawGForceCircle(this.orientation.project(null));
     await this.refreshRuns();
   }
 
@@ -103,9 +106,8 @@ export class TelemetryUI {
     this.lapSummary = document.getElementById("lapSummary");
     this.orientationSummary = document.getElementById("orientationSummary");
     this.calibrationStatus = document.getElementById("calibrationStatus");
+    this.captureMountButton = document.getElementById("captureMountButton");
     this.calibrateForwardButton = document.getElementById("calibrateForwardButton");
-    this.verticalAxisSelect = document.getElementById("verticalAxisSelect");
-    this.forwardAxisSelect = document.getElementById("forwardAxisSelect");
     this.lateralLabel = document.getElementById("lateralLabel");
     this.longitudinalLabel = document.getElementById("longitudinalLabel");
     this.verticalLabel = document.getElementById("verticalLabel");
@@ -129,11 +131,10 @@ export class TelemetryUI {
     this.maxDurationInput.addEventListener("input", () => this.updateSettingSummary());
     this.lapDistanceInput.addEventListener("input", () => this.updateSettingSummary());
     this.lapMinTimeInput.addEventListener("input", () => this.updateSettingSummary());
-    this.verticalAxisSelect.addEventListener("change", () => this.handleMountSelectionChange());
-    this.forwardAxisSelect.addEventListener("change", () => this.handleMountSelectionChange());
+    this.captureMountButton.addEventListener("click", () => this.handleCaptureMount());
+    this.calibrateForwardButton.addEventListener("click", () => this.handleStartCalibration());
     this.enableImuButton.addEventListener("click", () => this.handleEnableImu());
     this.disableImuButton.addEventListener("click", () => this.handleDisableImu());
-    this.calibrateForwardButton.addEventListener("click", () => this.handleStartCalibration());
 
     for (const button of this.tabButtons) {
       button.addEventListener("click", () => this.showPage(button.dataset.page));
@@ -198,22 +199,118 @@ export class TelemetryUI {
   refreshOrientationSummary() {
     const status = this.orientation.getStatus();
     this.orientationSummary.textContent = `${status.mode} (${status.upLabel}, ${status.forwardLabel})`;
-    this.calibrationStatus.textContent = status.calibrating
-      ? "Calibrating now"
-      : this.orientation.calibratedForward
-        ? "Forward axis calibrated"
-        : "Waiting for auto-detect";
-    this.calibrationStatus.className = `status-pill ${status.calibrating ? "recording" : "idle"}`;
+    this.calibrationStatus.textContent = status.capturingMount
+      ? "Capturing mount angle"
+      : status.calibratingForward
+        ? "Calibrating forward"
+        : this.orientation.isConfigured()
+          ? "Orientation ready"
+          : this.orientation.hasMountCapture()
+            ? "Forward calibration needed"
+            : "Capture mount first";
+    this.calibrationStatus.className = `status-pill ${
+      status.capturingMount || status.calibratingForward ? "recording" : "idle"
+    }`;
   }
 
-  handleMountSelectionChange() {
-    this.orientation.setVerticalPreference(this.verticalAxisSelect.value);
-    this.orientation.setForwardPreference(this.forwardAxisSelect.value);
+  async ensureMotionStream(message) {
+    const permissions = await this.sensors.requestPermissions({ location: false, motion: true });
+    if (!permissions.ok) {
+      this.showPermissionMessage(permissions.issues.join(" "));
+      return false;
+    }
+
+    if (!this.recordingActive) {
+      this.imuStreaming = true;
+      this.syncSensors();
+    }
+
+    if (message) {
+      this.showPermissionMessage(message);
+    }
+    return true;
+  }
+
+  async handleCaptureMount() {
+    const ready = await this.ensureMotionStream(
+      "Capturing mount angle. Leave the phone fixed and still for a moment.",
+    );
+    if (!ready) {
+      return;
+    }
+
+    this.orientation.startMountCapture();
+    if (this.mountCaptureTimer) {
+      window.clearTimeout(this.mountCaptureTimer);
+    }
+    this.mountCaptureTimer = window.setTimeout(() => {
+      this.completeMountCapture();
+    }, 1400);
+    this.refreshOrientationSummary();
+  }
+
+  completeMountCapture() {
+    if (this.mountCaptureTimer) {
+      window.clearTimeout(this.mountCaptureTimer);
+      this.mountCaptureTimer = null;
+    }
+
+    const captured = this.orientation.finishMountCapture();
     this.refreshOrientationSummary();
     this.drawGForceCircle(this.orientation.project(null));
+    this.showPermissionMessage(
+      captured
+        ? "Mount angle captured. Now use Calibrate Forward and drive straight ahead."
+        : "Mount capture failed. Hold the phone still on the mount and try again.",
+    );
+  }
+
+  async handleStartCalibration() {
+    if (!this.orientation.hasMountCapture()) {
+      this.showPermissionMessage("Capture the mount angle before calibrating forward motion.");
+      return;
+    }
+
+    const ready = await this.ensureMotionStream(
+      "Forward calibration started. Drive straight forward for about 3 seconds.",
+    );
+    if (!ready) {
+      return;
+    }
+
+    this.orientation.startForwardCalibration();
+    if (this.calibrationTimer) {
+      window.clearTimeout(this.calibrationTimer);
+    }
+    this.calibrationTimer = window.setTimeout(() => {
+      this.completeCalibration();
+    }, 3400);
+    this.refreshOrientationSummary();
+  }
+
+  completeCalibration() {
+    if (this.calibrationTimer) {
+      window.clearTimeout(this.calibrationTimer);
+      this.calibrationTimer = null;
+    }
+
+    const updated = this.orientation.finishForwardCalibration();
+    this.refreshOrientationSummary();
+    this.showPermissionMessage(
+      updated
+        ? "Forward calibration complete. The app is ready to record runs."
+        : "Forward calibration failed. Drive straight and try the forward calibration again.",
+    );
   }
 
   async handleStartRun() {
+    if (!this.orientation.isConfigured()) {
+      this.showPermissionMessage(
+        "Capture the mount angle and calibrate forward before starting a measurement run.",
+      );
+      return;
+    }
+
     const permissions = await this.sensors.requestPermissions({ location: true, motion: true });
     if (!permissions.ok) {
       this.showPermissionMessage(permissions.issues.join(" "));
@@ -261,15 +358,10 @@ export class TelemetryUI {
   }
 
   async handleEnableImu() {
-    const permissions = await this.sensors.requestPermissions({ location: false, motion: true });
-    if (!permissions.ok) {
-      this.showPermissionMessage(permissions.issues.join(" "));
+    const ready = await this.ensureMotionStream("");
+    if (!ready) {
       return;
     }
-
-    this.imuStreaming = true;
-    this.updateImuButtons();
-    this.syncSensors();
     this.showPage("imuPage");
   }
 
@@ -277,31 +369,6 @@ export class TelemetryUI {
     this.imuStreaming = false;
     this.updateImuButtons();
     this.syncSensors();
-  }
-
-  async handleStartCalibration() {
-    const permissions = await this.sensors.requestPermissions({ location: false, motion: true });
-    if (!permissions.ok) {
-      this.showPermissionMessage(permissions.issues.join(" "));
-      return;
-    }
-
-    if (!this.recordingActive) {
-      this.imuStreaming = true;
-      this.syncSensors();
-    }
-
-    this.orientation.startCalibration();
-    if (this.calibrationTimer) {
-      window.clearTimeout(this.calibrationTimer);
-    }
-    this.calibrationTimer = window.setTimeout(() => {
-      this.completeCalibration();
-    }, 3400);
-    this.refreshOrientationSummary();
-    this.showPermissionMessage(
-      "Forward calibration started. Accelerate straight forward for about 3 seconds.",
-    );
   }
 
   updateImuButtons() {
@@ -328,21 +395,6 @@ export class TelemetryUI {
     this.drawGForceCircle(projection);
     this.imuView.update(payload);
     this.recorder.ingestMotion(payload);
-  }
-
-  completeCalibration() {
-    if (this.calibrationTimer) {
-      window.clearTimeout(this.calibrationTimer);
-      this.calibrationTimer = null;
-    }
-
-    const updated = this.orientation.finishCalibration();
-    this.refreshOrientationSummary();
-    this.showPermissionMessage(
-      updated
-        ? "Forward calibration complete."
-        : "Calibration finished, but there was not enough straight-line acceleration to lock a forward axis.",
-    );
   }
 
   startElapsedTimer() {
@@ -440,12 +492,12 @@ export class TelemetryUI {
   }
 
   async refreshRuns(selectRunId = this.selectedRun?.id) {
-    const runs = await this.storage.getRuns();
-    this.renderRunList(runs, selectRunId);
+    this.runs = await this.storage.getRuns();
+    this.renderRunList(this.runs, selectRunId);
 
-    if (runs.length) {
-      const targetId = selectRunId ?? runs[0].id;
-      const run = runs.find((item) => item.id === targetId) ?? runs[0];
+    if (this.runs.length) {
+      const targetId = selectRunId ?? this.runs[0].id;
+      const run = this.runs.find((item) => item.id === targetId) ?? this.runs[0];
       this.renderRunDetails(run);
     } else {
       this.selectedRun = null;
@@ -493,6 +545,7 @@ export class TelemetryUI {
 
   renderRunDetails(run) {
     this.selectedRun = run;
+    this.renderRunList(this.runs, run.id);
     this.detailTitle.textContent = new Date(run.date).toLocaleString();
     this.exportJsonButton.disabled = false;
     this.exportCsvButton.disabled = false;
@@ -531,16 +584,10 @@ export class TelemetryUI {
       <section id="chartMount"></section>
     `;
 
-    this.renderRunListFromCurrentSelection(run.id);
     this.mapView = new MapView(document.getElementById("contextMapMount"));
     this.mapView.render(run.samples, { compact: true });
     this.charts = new RunCharts(document.getElementById("chartMount"));
     this.charts.render(run.analysis.derived);
-  }
-
-  async renderRunListFromCurrentSelection(selectedId) {
-    const runs = await this.storage.getRuns();
-    this.renderRunList(runs, selectedId);
   }
 
   updateLiveSpeed(speed) {
