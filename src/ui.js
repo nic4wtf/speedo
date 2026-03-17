@@ -68,6 +68,8 @@ export class TelemetryUI {
     this.maxDurationTimer = null;
     this.mountCaptureTimer = null;
     this.calibrationTimer = null;
+    this.wakeLock = null;
+    this.serviceWorkerRegistration = null;
   }
 
   async init() {
@@ -155,12 +157,14 @@ export class TelemetryUI {
       this.deferredPrompt = event;
       this.installButton.hidden = false;
     });
+
+    document.addEventListener("visibilitychange", () => this.handleVisibilityChange());
   }
 
   async registerPwa() {
     if ("serviceWorker" in navigator) {
       try {
-        await navigator.serviceWorker.register("./sw.js");
+        this.serviceWorkerRegistration = await navigator.serviceWorker.register("./sw.js");
       } catch (error) {
         console.warn("Service worker registration failed", error);
       }
@@ -321,6 +325,8 @@ export class TelemetryUI {
     const options = this.getRecorderOptions();
     this.recordingActive = true;
     this.recorder.start(options);
+    await this.requestNotificationPermission();
+    await this.acquireWakeLock();
     this.startButton.disabled = true;
     this.stopButton.disabled = false;
     this.startElapsedTimer();
@@ -336,6 +342,8 @@ export class TelemetryUI {
     this.recordingActive = false;
     this.clearMaxDurationTimer();
     this.stopElapsedTimer();
+    await this.releaseWakeLock();
+    await this.clearRecordingNotification();
     this.syncSensors();
 
     const run = this.recorder.stop();
@@ -374,6 +382,99 @@ export class TelemetryUI {
   updateImuButtons() {
     this.enableImuButton.disabled = this.imuStreaming;
     this.disableImuButton.disabled = !this.imuStreaming;
+  }
+
+  async requestNotificationPermission() {
+    if (!("Notification" in window) || Notification.permission !== "default") {
+      return;
+    }
+
+    try {
+      await Notification.requestPermission();
+    } catch (error) {
+      console.warn("Notification permission request failed", error);
+    }
+  }
+
+  async acquireWakeLock() {
+    if (!("wakeLock" in navigator) || document.visibilityState !== "visible") {
+      return;
+    }
+
+    try {
+      this.wakeLock = await navigator.wakeLock.request("screen");
+      this.wakeLock.addEventListener("release", () => {
+        this.wakeLock = null;
+      });
+    } catch (error) {
+      console.warn("Wake lock request failed", error);
+      this.showPermissionMessage(
+        "Screen wake lock was not granted. Keep the phone awake manually while recording.",
+      );
+    }
+  }
+
+  async releaseWakeLock() {
+    if (!this.wakeLock) {
+      return;
+    }
+
+    try {
+      await this.wakeLock.release();
+    } catch (error) {
+      console.warn("Wake lock release failed", error);
+    }
+    this.wakeLock = null;
+  }
+
+  async showRecordingNotification() {
+    if (!this.serviceWorkerRegistration || !("Notification" in window)) {
+      return;
+    }
+
+    if (Notification.permission !== "granted") {
+      return;
+    }
+
+    await this.serviceWorkerRegistration.showNotification("Telemetry recording in progress", {
+      body: "Keep the app visible and the phone unlocked for the most reliable sensor capture.",
+      tag: "telemetry-recording",
+      icon: "./assets/icon.svg",
+      badge: "./assets/icon.svg",
+      requireInteraction: true,
+      renotify: false,
+      silent: true,
+    });
+  }
+
+  async clearRecordingNotification() {
+    if (!this.serviceWorkerRegistration) {
+      return;
+    }
+
+    const notifications = await this.serviceWorkerRegistration.getNotifications({
+      tag: "telemetry-recording",
+    });
+    for (const notification of notifications) {
+      notification.close();
+    }
+  }
+
+  async handleVisibilityChange() {
+    if (!this.recordingActive) {
+      return;
+    }
+
+    if (document.visibilityState === "visible") {
+      await this.acquireWakeLock();
+      await this.clearRecordingNotification();
+      return;
+    }
+
+    await this.showRecordingNotification();
+    this.showPermissionMessage(
+      "Recording is still marked active, but most mobile browsers may pause sensors if the app is hidden or the phone is locked.",
+    );
   }
 
   syncSensors() {

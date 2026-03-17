@@ -24,6 +24,7 @@ Then open the site in a modern mobile browser, ideally Android Chrome, and grant
 
 - Run recording with geolocation and motion events
 - Configurable logging-rate cap and maximum recording time
+- Screen wake lock during active recording where the browser supports it
 - IndexedDB persistence
 - Automatic run analysis
 - Map replay with Leaflet
@@ -36,6 +37,8 @@ Then open the site in a modern mobile browser, ideally Android Chrome, and grant
 ## Notes
 
 - GNSS update rates vary by phone and browser.
+- The app will try to keep the screen awake while recording, but support depends on the browser and OS power policy.
+- Browser PWAs cannot reliably guarantee GNSS and motion capture after the page is backgrounded or the phone is locked. A recording notification is shown as a best-effort reminder, not as a native Android foreground service.
 - Motion axes are device-relative. The current braking and acceleration metrics are estimated from speed deltas, which is more stable before phone-mount calibration is added.
 - For best results, keep the phone mounted consistently and ensure high-accuracy location is enabled.
 
