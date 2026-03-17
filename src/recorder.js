@@ -58,8 +58,9 @@ export class RunRecorder {
 
   ingestLocation(location) {
     this.latestLocation = location;
-    const speedKmh = Number.isFinite(location.speed) ? location.speed * 3.6 : 0;
-    this.onLiveSpeed?.(speedKmh);
+    if (Number.isFinite(location.speed)) {
+      this.onLiveSpeed?.(location.speed * 3.6);
+    }
 
     if (!this.isRecording()) {
       return;

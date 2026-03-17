@@ -7,6 +7,8 @@ import { RunRecorder } from "./recorder.js";
 import { SensorManager } from "./sensors.js";
 import { RunStorage } from "./storage.js";
 
+const GRAVITY = 9.80665;
+
 function downloadBlob(filename, content, mimeType) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -70,6 +72,7 @@ export class TelemetryUI {
     this.calibrationTimer = null;
     this.wakeLock = null;
     this.serviceWorkerRegistration = null;
+    this.liveSpeedState = this.createLiveSpeedState();
   }
 
   async init() {
@@ -122,6 +125,14 @@ export class TelemetryUI {
     this.imuMount = document.getElementById("imuMount");
     this.pages = [...document.querySelectorAll(".page")];
     this.tabButtons = [...document.querySelectorAll(".tab-button")];
+  }
+
+  createLiveSpeedState() {
+    return {
+      estimatedSpeedMps: 0,
+      lastMotionTimestamp: 0,
+      hasGnssFix: false,
+    };
   }
 
   bindEvents() {
@@ -324,6 +335,8 @@ export class TelemetryUI {
 
     const options = this.getRecorderOptions();
     this.recordingActive = true;
+    this.liveSpeedState = this.createLiveSpeedState();
+    this.updateLiveSpeed(0);
     this.recorder.start(options);
     await this.requestNotificationPermission();
     await this.acquireWakeLock();
@@ -345,6 +358,7 @@ export class TelemetryUI {
     await this.releaseWakeLock();
     await this.clearRecordingNotification();
     this.syncSensors();
+    this.liveSpeedState = this.createLiveSpeedState();
 
     const run = this.recorder.stop();
     this.startButton.disabled = false;
@@ -486,16 +500,55 @@ export class TelemetryUI {
   }
 
   handleLocation(payload) {
+    if (Number.isFinite(payload.speed)) {
+      this.liveSpeedState.estimatedSpeedMps = Math.max(0, payload.speed);
+      this.liveSpeedState.lastMotionTimestamp = payload.timestamp ?? 0;
+      this.liveSpeedState.hasGnssFix = true;
+      this.updateLiveSpeed(this.liveSpeedState.estimatedSpeedMps * 3.6);
+    }
+
     this.recorder.ingestLocation(payload);
   }
 
   handleMotion(payload) {
     this.orientation.ingestMotion(payload);
     const projection = this.orientation.project(payload);
+    this.updateLiveSpeedFromMotion(payload, projection);
     this.refreshOrientationSummary();
     this.drawGForceCircle(projection);
     this.imuView.update(payload);
     this.recorder.ingestMotion(payload);
+  }
+
+  updateLiveSpeedFromMotion(payload, projection) {
+    if (!this.recordingActive || !this.liveSpeedState.hasGnssFix) {
+      return;
+    }
+
+    const timestamp = payload?.timestamp ?? 0;
+    if (!timestamp) {
+      return;
+    }
+
+    const previousTimestamp = this.liveSpeedState.lastMotionTimestamp;
+    this.liveSpeedState.lastMotionTimestamp = timestamp;
+    if (!previousTimestamp) {
+      return;
+    }
+
+    const deltaSeconds = Math.min(Math.max((timestamp - previousTimestamp) / 1000, 0), 0.15);
+    if (!deltaSeconds) {
+      return;
+    }
+
+    const longitudinalAccel = (projection?.longitudinalG ?? 0) * GRAVITY;
+    const estimatedSpeedMps = Math.max(
+      0,
+      this.liveSpeedState.estimatedSpeedMps + longitudinalAccel * deltaSeconds,
+    );
+
+    this.liveSpeedState.estimatedSpeedMps = estimatedSpeedMps;
+    this.updateLiveSpeed(estimatedSpeedMps * 3.6);
   }
 
   startElapsedTimer() {
