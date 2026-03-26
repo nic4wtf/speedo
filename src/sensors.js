@@ -96,22 +96,25 @@ export class SensorManager {
   }
 
   handleMotion(event) {
-    const linear = event.acceleration ?? event.accelerationIncludingGravity;
-    const gravity = event.accelerationIncludingGravity ?? event.acceleration;
-    if (!linear) {
+    const absolute = event.accelerationIncludingGravity;
+    const linear = event.acceleration;
+    if (!absolute && !linear) {
       return;
     }
     this.onStatus?.("motion", "Live");
     this.onMotion?.({
       timestamp: performance.timeOrigin + performance.now(),
-      accelX: linear.x,
-      accelY: linear.y,
-      accelZ: linear.z,
-      gravityX: gravity?.x ?? null,
-      gravityY: gravity?.y ?? null,
-      gravityZ: gravity?.z ?? null,
+      accelX: absolute?.x ?? linear?.x ?? null,
+      accelY: absolute?.y ?? linear?.y ?? null,
+      accelZ: absolute?.z ?? linear?.z ?? null,
+      rawAccelX: absolute?.x ?? null,
+      rawAccelY: absolute?.y ?? null,
+      rawAccelZ: absolute?.z ?? null,
+      linearAccelX: linear?.x ?? null,
+      linearAccelY: linear?.y ?? null,
+      linearAccelZ: linear?.z ?? null,
       interval: event.interval,
-      includesGravity: !event.acceleration && Boolean(event.accelerationIncludingGravity),
+      hasAbsoluteAcceleration: Boolean(absolute),
     });
   }
 }

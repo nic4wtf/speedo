@@ -113,6 +113,7 @@ export class TelemetryUI {
     this.calibrationStatus = document.getElementById("calibrationStatus");
     this.captureMountButton = document.getElementById("captureMountButton");
     this.calibrateForwardButton = document.getElementById("calibrateForwardButton");
+    this.skipCalibrationButton = document.getElementById("skipCalibrationButton");
     this.lateralLabel = document.getElementById("lateralLabel");
     this.longitudinalLabel = document.getElementById("longitudinalLabel");
     this.verticalLabel = document.getElementById("verticalLabel");
@@ -146,6 +147,7 @@ export class TelemetryUI {
     this.lapMinTimeInput.addEventListener("input", () => this.updateSettingSummary());
     this.captureMountButton.addEventListener("click", () => this.handleCaptureMount());
     this.calibrateForwardButton.addEventListener("click", () => this.handleStartCalibration());
+    this.skipCalibrationButton.addEventListener("click", () => this.handleSkipCalibration());
     this.enableImuButton.addEventListener("click", () => this.handleEnableImu());
     this.disableImuButton.addEventListener("click", () => this.handleDisableImu());
 
@@ -214,7 +216,9 @@ export class TelemetryUI {
   refreshOrientationSummary() {
     const status = this.orientation.getStatus();
     this.orientationSummary.textContent = `${status.mode} (${status.upLabel}, ${status.forwardLabel})`;
-    this.calibrationStatus.textContent = status.capturingMount
+    this.calibrationStatus.textContent = status.skipped
+      ? "GPS-only mode enabled"
+      : status.capturingMount
       ? "Capturing mount angle"
       : status.calibratingForward
         ? "Calibrating forward"
@@ -264,6 +268,19 @@ export class TelemetryUI {
     this.refreshOrientationSummary();
   }
 
+  handleSkipCalibration() {
+    this.orientation.skipCalibration();
+    this.refreshOrientationSummary();
+    this.drawGForceCircle(this.orientation.project(null));
+    if (!this.recordingActive) {
+      this.imuStreaming = false;
+      this.syncSensors();
+    }
+    this.showPermissionMessage(
+      "IMU calibration skipped. Runs can record with GPS only, and g-force orientation will stay disabled.",
+    );
+  }
+
   completeMountCapture() {
     if (this.mountCaptureTimer) {
       window.clearTimeout(this.mountCaptureTimer);
@@ -275,8 +292,8 @@ export class TelemetryUI {
     this.drawGForceCircle(this.orientation.project(null));
     this.showPermissionMessage(
       captured
-        ? "Mount angle captured. Now use Calibrate Forward and drive straight ahead."
-        : "Mount capture failed. Hold the phone still on the mount and try again.",
+        ? "Mount angle captured from raw accelerometer data. Now use Calibrate Forward and drive straight ahead."
+        : "Mount capture failed. Hold the phone still on the mount and make sure absolute accelerometer data is available.",
     );
   }
 
@@ -313,25 +330,28 @@ export class TelemetryUI {
     this.refreshOrientationSummary();
     this.showPermissionMessage(
       updated
-        ? "Forward calibration complete. The app is ready to record runs."
-        : "Forward calibration failed. Drive straight and try the forward calibration again.",
+        ? "Forward calibration complete. Vehicle axes are now locked from the raw accelerometer calibration."
+        : "Forward calibration failed. Drive straight with a clear forward acceleration and try again.",
     );
   }
 
   async handleStartRun() {
     if (!this.orientation.isConfigured()) {
       this.showPermissionMessage(
-        "Capture the mount angle and calibrate forward before starting a measurement run.",
+        "Capture the mount angle and calibrate forward before starting a measurement run, or skip IMU calibration for GPS-only logging.",
       );
       return;
     }
 
-    const permissions = await this.sensors.requestPermissions({ location: true, motion: true });
+    const permissions = await this.sensors.requestPermissions({
+      location: true,
+      motion: !this.orientation.isSkipped(),
+    });
     if (!permissions.ok) {
       this.showPermissionMessage(permissions.issues.join(" "));
-    } else {
-      this.showPermissionMessage("");
+      return;
     }
+    this.showPermissionMessage("");
 
     const options = this.getRecorderOptions();
     this.recordingActive = true;
@@ -494,7 +514,7 @@ export class TelemetryUI {
   syncSensors() {
     this.sensors.setStreams({
       location: this.recordingActive,
-      motion: this.recordingActive || this.imuStreaming,
+      motion: this.imuStreaming || (this.recordingActive && !this.orientation.isSkipped()),
     });
     this.updateImuButtons();
   }
@@ -637,9 +657,9 @@ export class TelemetryUI {
     context.fillText("L", centerX - radius - 16, centerY + 4);
     context.fillText("R", centerX + radius + 16, centerY + 4);
 
-    this.lateralLabel.textContent = `Sideways (${projection?.lateralAxis?.toUpperCase() ?? "?"})`;
-    this.longitudinalLabel.textContent = `Forward (${projection?.longitudinalAxis?.toUpperCase() ?? "?"})`;
-    this.verticalLabel.textContent = `Vertical (${projection?.verticalAxis?.toUpperCase() ?? "?"})`;
+    this.lateralLabel.textContent = `Sideways (${projection?.lateralAxis ?? "?"})`;
+    this.longitudinalLabel.textContent = `Forward (${projection?.longitudinalAxis ?? "?"})`;
+    this.verticalLabel.textContent = `Vertical (${projection?.verticalAxis ?? "?"})`;
     this.lateralG.textContent = formatG(lateral);
     this.longitudinalG.textContent = formatG(-longitudinal);
     this.verticalG.textContent = formatG(vertical);
