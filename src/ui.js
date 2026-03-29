@@ -76,6 +76,7 @@ export class TelemetryUI {
     this.wakeLock = null;
     this.serviceWorkerRegistration = null;
     this.liveSpeedState = this.createLiveSpeedState();
+    this.updateStatusTimer = null;
   }
 
   async init() {
@@ -108,6 +109,7 @@ export class TelemetryUI {
     this.exportCsvButton = document.getElementById("exportCsvButton");
     this.deleteRunButton = document.getElementById("deleteRunButton");
     this.checkUpdatesButton = document.getElementById("checkUpdatesButton");
+    this.updateStatusMessage = document.getElementById("updateStatusMessage");
     this.installButton = document.getElementById("installButton");
     this.sampleRateInput = document.getElementById("sampleRateInput");
     this.maxDurationInput = document.getElementById("maxDurationInput");
@@ -202,7 +204,7 @@ export class TelemetryUI {
 
   async handleCheckForUpdates() {
     if (!this.serviceWorkerRegistration) {
-      this.showPermissionMessage("Update checks are unavailable because the service worker is not active.");
+      this.showUpdateStatus("Updates unavailable.");
       return;
     }
 
@@ -222,18 +224,42 @@ export class TelemetryUI {
       }
 
       if (this.serviceWorkerRegistration.waiting) {
-        this.showPermissionMessage("New version found. Reloading into the latest build.");
+        this.showUpdateStatus("Update found. Reloading...");
         this.serviceWorkerRegistration.waiting.postMessage({ type: "SKIP_WAITING" });
         return;
       }
 
-      this.showPermissionMessage("You are already on the latest version available to this phone.");
+      this.showUpdateStatus("Already up to date.");
     } catch (error) {
       console.warn("Update check failed", error);
-      this.showPermissionMessage("Update check failed. Make sure the phone is online and try again.");
+      this.showUpdateStatus("Update check failed.");
     } finally {
       this.checkUpdatesButton.disabled = false;
     }
+  }
+
+  showUpdateStatus(message, durationMs = 3200) {
+    if (!this.updateStatusMessage) {
+      return;
+    }
+
+    if (this.updateStatusTimer) {
+      window.clearTimeout(this.updateStatusTimer);
+      this.updateStatusTimer = null;
+    }
+
+    this.updateStatusMessage.hidden = !message;
+    this.updateStatusMessage.textContent = message;
+
+    if (!message) {
+      return;
+    }
+
+    this.updateStatusTimer = window.setTimeout(() => {
+      this.updateStatusMessage.hidden = true;
+      this.updateStatusMessage.textContent = "";
+      this.updateStatusTimer = null;
+    }, durationMs);
   }
 
   showPage(pageId) {

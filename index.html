@@ -31,6 +31,10 @@
           <div class="title-row">
             <h1>Speedo</h1>
             <span class="version-badge">v0.08</span>
+            <button id="checkUpdatesButton" class="secondary-button utility-button" type="button">
+              Check Updates
+            </button>
+            <span id="updateStatusMessage" class="header-status" hidden></span>
           </div>
         </div>
         <button id="installButton" class="secondary-button" hidden>Install</button>
@@ -46,11 +50,6 @@
         <section id="recorderPage" class="page active">
           <section class="panel live-panel">
             <div class="live-stage">
-              <div class="live-panel-head">
-                <button id="checkUpdatesButton" class="secondary-button utility-button" type="button">
-                  Check Updates
-                </button>
-              </div>
               <div class="speed-stack">
                 <div class="speed-value">
                   <span id="liveSpeed">0</span>
