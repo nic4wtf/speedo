@@ -1,4 +1,5 @@
 const KMH_FACTOR = 3.6;
+const QUARTER_MILE_METERS = 402.336;
 
 function haversineDistanceMeters(a, b) {
   if (!a || !b || a.lat == null || a.lon == null || b.lat == null || b.lon == null) {
@@ -21,6 +22,51 @@ function haversineDistanceMeters(a, b) {
 
 function numericValues(values) {
   return values.filter((value) => Number.isFinite(value));
+}
+
+function computeDistanceMetrics(samples) {
+  const gnssSamples = samples.filter(
+    (sample) =>
+      Number.isFinite(sample?.timestamp) &&
+      Number.isFinite(sample?.lat) &&
+      Number.isFinite(sample?.lon),
+  );
+
+  if (gnssSamples.length < 2) {
+    return {
+      distanceMeters: 0,
+      quarterMileSeconds: null,
+    };
+  }
+
+  const startTimestamp = gnssSamples[0].timestamp;
+  let distanceMeters = 0;
+  let quarterMileSeconds = null;
+
+  for (let index = 1; index < gnssSamples.length; index += 1) {
+    const previous = gnssSamples[index - 1];
+    const current = gnssSamples[index];
+    const segmentDistance = haversineDistanceMeters(previous, current);
+    const previousDistance = distanceMeters;
+    distanceMeters += segmentDistance;
+
+    if (
+      quarterMileSeconds == null &&
+      segmentDistance > 0 &&
+      previousDistance < QUARTER_MILE_METERS &&
+      distanceMeters >= QUARTER_MILE_METERS
+    ) {
+      const segmentFraction = (QUARTER_MILE_METERS - previousDistance) / segmentDistance;
+      const interpolatedTimestamp =
+        previous.timestamp + (current.timestamp - previous.timestamp) * segmentFraction;
+      quarterMileSeconds = (interpolatedTimestamp - startTimestamp) / 1000;
+    }
+  }
+
+  return {
+    distanceMeters,
+    quarterMileSeconds,
+  };
 }
 
 function detectLaps(samples, config = {}) {
@@ -125,13 +171,7 @@ export function analyzeRun(run) {
   const derived = buildDerivedSeries(samples);
   const laps = detectLaps(samples, run.config);
   const speedValues = numericValues(samples.map((sample) => sample.speed));
-  // Distance is reconstructed from GNSS points so it still works if browser speed is noisy.
-  const distance = samples.reduce((total, sample, index) => {
-    if (index === 0) {
-      return total;
-    }
-    return total + haversineDistanceMeters(samples[index - 1], sample);
-  }, 0);
+  const distanceMetrics = computeDistanceMetrics(samples);
 
   let zeroToHundred = null;
   const threshold = 100 / KMH_FACTOR;
@@ -154,8 +194,9 @@ export function analyzeRun(run) {
           ? (speedValues.reduce((total, speed) => total + speed, 0) / speedValues.length) *
             KMH_FACTOR
           : 0,
-      distanceMeters: distance,
+      distanceMeters: distanceMetrics.distanceMeters,
       zeroToHundredSeconds: zeroToHundred,
+      quarterMileSeconds: distanceMetrics.quarterMileSeconds,
       peakLongitudinalAcceleration:
         accelerationSeries.length ? Math.max(...accelerationSeries) : 0,
       peakBrakingDeceleration: accelerationSeries.length ? Math.min(...accelerationSeries) : 0,

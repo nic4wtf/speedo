@@ -37,14 +37,14 @@ export class MapView {
     }).addTo(this.map);
 
     this.polyline = L.polyline(points, {
-      color: "#6ef3b0",
+      color: "#ff7a2f",
       weight: options.compact ? 3 : 4,
     }).addTo(this.map);
 
     L.circleMarker(points[0], {
       radius: options.compact ? 5 : 6,
       color: "#ffffff",
-      fillColor: "#10d98c",
+      fillColor: "#ff4121",
       fillOpacity: 1,
     }).addTo(this.map);
 

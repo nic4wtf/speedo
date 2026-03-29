@@ -42,7 +42,7 @@ export class IMUView {
           {
             label: "Lateral X",
             data: [],
-            borderColor: "#6ef3b0",
+            borderColor: "#ff7a2f",
             pointRadius: 0,
             tension: 0.22,
           },
@@ -56,7 +56,7 @@ export class IMUView {
           {
             label: "Vertical Z",
             data: [],
-            borderColor: "#7ec8ff",
+            borderColor: "#ff9958",
             pointRadius: 0,
             tension: 0.22,
           },

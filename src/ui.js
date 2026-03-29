@@ -1,5 +1,6 @@
 import { analyzeRun, formatDuration, formatNumber, runToCsv } from "./analysis.js";
 import { RunCharts } from "./charts.js";
+import { LightMotionFilter } from "./filters.js";
 import { IMUView } from "./imuview.js";
 import { MapView } from "./mapview.js";
 import { MountOrientation } from "./orientation.js";
@@ -45,6 +46,7 @@ export class TelemetryUI {
   constructor() {
     this.storage = new RunStorage();
     this.orientation = new MountOrientation();
+    this.motionFilter = new LightMotionFilter(0.18);
     this.recorder = new RunRecorder({
       onLiveSpeed: (speed) => this.updateLiveSpeed(speed),
       onSampleCount: (count) => {
@@ -97,10 +99,12 @@ export class TelemetryUI {
     this.sampleCount = document.getElementById("sampleCount");
     this.elapsedValue = document.getElementById("elapsedValue");
     this.runList = document.getElementById("runList");
+    this.runSummaryBar = document.getElementById("runSummaryBar");
     this.runDetails = document.getElementById("runDetails");
     this.detailTitle = document.getElementById("detailTitle");
     this.exportJsonButton = document.getElementById("exportJsonButton");
     this.exportCsvButton = document.getElementById("exportCsvButton");
+    this.deleteRunButton = document.getElementById("deleteRunButton");
     this.installButton = document.getElementById("installButton");
     this.sampleRateInput = document.getElementById("sampleRateInput");
     this.maxDurationInput = document.getElementById("maxDurationInput");
@@ -141,6 +145,7 @@ export class TelemetryUI {
     this.stopButton.addEventListener("click", () => this.handleStopRun());
     this.exportJsonButton.addEventListener("click", () => this.exportRun("json"));
     this.exportCsvButton.addEventListener("click", () => this.exportRun("csv"));
+    this.deleteRunButton.addEventListener("click", () => this.handleDeleteRun());
     this.sampleRateInput.addEventListener("input", () => this.updateSettingSummary());
     this.maxDurationInput.addEventListener("input", () => this.updateSettingSummary());
     this.lapDistanceInput.addEventListener("input", () => this.updateSettingSummary());
@@ -213,6 +218,33 @@ export class TelemetryUI {
         : "Disabled";
   }
 
+  getBestQuarterMile(runs = this.runs) {
+    return runs.reduce((best, run) => {
+      const current = run.analysis?.quarterMileSeconds;
+      if (!Number.isFinite(current)) {
+        return best;
+      }
+      if (best == null || current < best) {
+        return current;
+      }
+      return best;
+    }, null);
+  }
+
+  renderRunSummary(runs) {
+    const bestQuarterMile = this.getBestQuarterMile(runs);
+    this.runSummaryBar.innerHTML = `
+      <article class="detail-stat">
+        <span>Saved Runs</span>
+        <strong>${runs.length}</strong>
+      </article>
+      <article class="detail-stat">
+        <span>Best 1/4 Mile</span>
+        <strong>${formatNumber(bestQuarterMile, 2, " s")}</strong>
+      </article>
+    `;
+  }
+
   refreshOrientationSummary() {
     const status = this.orientation.getStatus();
     this.orientationSummary.textContent = `${status.mode} (${status.upLabel}, ${status.forwardLabel})`;
@@ -259,6 +291,7 @@ export class TelemetryUI {
     }
 
     this.orientation.startMountCapture();
+    this.motionFilter.reset();
     if (this.mountCaptureTimer) {
       window.clearTimeout(this.mountCaptureTimer);
     }
@@ -311,6 +344,7 @@ export class TelemetryUI {
     }
 
     this.orientation.startForwardCalibration();
+    this.motionFilter.reset();
     if (this.calibrationTimer) {
       window.clearTimeout(this.calibrationTimer);
     }
@@ -355,6 +389,7 @@ export class TelemetryUI {
 
     const options = this.getRecorderOptions();
     this.recordingActive = true;
+    this.motionFilter.reset();
     this.liveSpeedState = this.createLiveSpeedState();
     this.updateLiveSpeed(0);
     this.recorder.start(options);
@@ -379,6 +414,7 @@ export class TelemetryUI {
     await this.clearRecordingNotification();
     this.syncSensors();
     this.liveSpeedState = this.createLiveSpeedState();
+    this.motionFilter.reset();
 
     const run = this.recorder.stop();
     this.startButton.disabled = false;
@@ -409,6 +445,7 @@ export class TelemetryUI {
 
   handleDisableImu() {
     this.imuStreaming = false;
+    this.motionFilter.reset();
     this.updateImuButtons();
     this.syncSensors();
   }
@@ -531,13 +568,14 @@ export class TelemetryUI {
   }
 
   handleMotion(payload) {
-    this.orientation.ingestMotion(payload);
-    const projection = this.orientation.project(payload);
-    this.updateLiveSpeedFromMotion(payload, projection);
+    const filteredMotion = this.motionFilter.process(payload);
+    this.orientation.ingestMotion(filteredMotion);
+    const projection = this.orientation.project(filteredMotion);
+    this.updateLiveSpeedFromMotion(filteredMotion, projection);
     this.refreshOrientationSummary();
     this.drawGForceCircle(projection);
-    this.imuView.update(payload);
-    this.recorder.ingestMotion(payload);
+    this.imuView.update(filteredMotion);
+    this.recorder.ingestMotion(filteredMotion);
   }
 
   updateLiveSpeedFromMotion(payload, projection) {
@@ -639,12 +677,12 @@ export class TelemetryUI {
     context.lineTo(centerX, centerY + radius);
     context.stroke();
 
-    context.fillStyle = "rgba(126,200,255,0.18)";
+    context.fillStyle = "rgba(255,153,88,0.18)";
     context.beginPath();
     context.arc(centerX, centerY, radius * 0.12, 0, Math.PI * 2);
     context.fill();
 
-    context.fillStyle = "#6ef3b0";
+    context.fillStyle = "#ff7a2f";
     context.beginPath();
     context.arc(pointX, pointY, 12, 0, Math.PI * 2);
     context.fill();
@@ -667,6 +705,7 @@ export class TelemetryUI {
 
   async refreshRuns(selectRunId = this.selectedRun?.id) {
     this.runs = await this.storage.getRuns();
+    this.renderRunSummary(this.runs);
     this.renderRunList(this.runs, selectRunId);
 
     if (this.runs.length) {
@@ -677,9 +716,27 @@ export class TelemetryUI {
       this.selectedRun = null;
       this.exportJsonButton.disabled = true;
       this.exportCsvButton.disabled = true;
+      this.deleteRunButton.disabled = true;
       this.runDetails.innerHTML =
         '<div class="details-empty"><p>Select a run to inspect speed, acceleration, braking, and trajectory.</p></div>';
     }
+  }
+
+  async handleDeleteRun() {
+    if (!this.selectedRun) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete the run from ${new Date(this.selectedRun.date).toLocaleString()}?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    await this.storage.deleteRun(this.selectedRun.id);
+    this.showPermissionMessage("Run deleted.");
+    await this.refreshRuns();
   }
 
   renderRunList(runs, selectedId) {
@@ -706,6 +763,7 @@ export class TelemetryUI {
         <h3>${formatNumber(run.analysis?.maxSpeedKmh, 1, " km/h")} max</h3>
         <div class="run-meta">
           <span>0-100 ${formatNumber(run.analysis?.zeroToHundredSeconds, 2, " s")}</span>
+          <span>1/4 ${formatNumber(run.analysis?.quarterMileSeconds, 2, " s")}</span>
           <span>${formatDuration(run.duration)}</span>
           <span>${run.samples.length} samples</span>
           <span>${rateSummary}</span>
@@ -723,6 +781,7 @@ export class TelemetryUI {
     this.detailTitle.textContent = new Date(run.date).toLocaleString();
     this.exportJsonButton.disabled = false;
     this.exportCsvButton.disabled = false;
+    this.deleteRunButton.disabled = false;
 
     const lapMarkup =
       run.analysis.laps.length > 0
@@ -750,6 +809,7 @@ export class TelemetryUI {
         <article class="detail-stat"><span>Average Speed</span><strong>${formatNumber(run.analysis.averageSpeedKmh, 1, " km/h")}</strong></article>
         <article class="detail-stat"><span>Distance</span><strong>${formatNumber(run.analysis.distanceMeters / 1000, 2, " km")}</strong></article>
         <article class="detail-stat"><span>0-100 km/h</span><strong>${formatNumber(run.analysis.zeroToHundredSeconds, 2, " s")}</strong></article>
+        <article class="detail-stat"><span>1/4 Mile</span><strong>${formatNumber(run.analysis.quarterMileSeconds, 2, " s")}</strong></article>
         <article class="detail-stat"><span>Peak Accel</span><strong>${formatNumber(run.analysis.peakLongitudinalAcceleration, 2, " m/s^2")}</strong></article>
         <article class="detail-stat"><span>Peak Braking</span><strong>${formatNumber(run.analysis.peakBrakingDeceleration, 2, " m/s^2")}</strong></article>
         <article class="detail-stat"><span>Laps</span><strong>${run.analysis.lapCount}</strong></article>

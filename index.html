@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#10212b" />
+    <meta name="theme-color" content="#210907" />
     <title>Telemetry Tracker</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="./assets/icon.svg" />
@@ -26,7 +26,10 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">Mobile Telemetry</p>
-          <h1>Telemetry Tracker</h1>
+          <div class="title-row">
+            <h1>Telemetry Tracker</h1>
+            <span class="version-badge">v0.06</span>
+          </div>
         </div>
         <button id="installButton" class="secondary-button" hidden>Install</button>
       </header>
@@ -130,8 +133,8 @@
                 <input
                   id="lapDistanceInput"
                   inputmode="decimal"
-                  placeholder="0, 10, 20"
-                  value="20"
+                  placeholder="0, 50, 150"
+                  value="150"
                 />
                 <small>Detect a lap when the car returns within this distance.</small>
               </label>
@@ -158,7 +161,7 @@
               </article>
               <article class="detail-stat">
                 <span>Lap Detection</span>
-                <strong id="lapSummary">20 m / 30 s</strong>
+                <strong id="lapSummary">150 m / 30 s</strong>
               </article>
               <article class="detail-stat">
                 <span>Mount Orientation</span>
@@ -204,9 +207,14 @@
                 <div class="detail-actions">
                   <button id="exportJsonButton" class="secondary-button" disabled>Export JSON</button>
                   <button id="exportCsvButton" class="secondary-button" disabled>Export CSV</button>
+                  <button id="deleteRunButton" class="danger-button" disabled>Delete Run</button>
                 </div>
               </div>
 
+              <div id="runSummaryBar" class="detail-grid">
+                <article class="detail-stat"><span>Saved Runs</span><strong>0</strong></article>
+                <article class="detail-stat"><span>Best 1/4 Mile</span><strong>N/A</strong></article>
+              </div>
               <div id="runDetails" class="details-empty">
                 <p>Select a run to inspect speed, acceleration, braking, and trajectory.</p>
               </div>

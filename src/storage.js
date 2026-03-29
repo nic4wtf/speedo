@@ -55,4 +55,14 @@ export class RunStorage {
       request.onerror = () => reject(request.error);
     });
   }
+
+  async deleteRun(id) {
+    const db = await this.dbPromise;
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, "readwrite");
+      transaction.objectStore(STORE_NAME).delete(id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
 }

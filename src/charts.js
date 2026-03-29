@@ -63,8 +63,8 @@ export class RunCharts {
           {
             label: "km/h",
             data: derivedSamples.map((item) => item.speedKmh),
-            borderColor: "#6ef3b0",
-            backgroundColor: "rgba(110,243,176,0.18)",
+            borderColor: "#ff7a2f",
+            backgroundColor: "rgba(255,122,47,0.18)",
             fill: true,
             tension: 0.22,
             pointRadius: 0,

@@ -1,16 +1,16 @@
 :root {
   color-scheme: light;
-  --bg: #07131a;
-  --panel: rgba(10, 25, 33, 0.82);
-  --panel-border: rgba(255, 255, 255, 0.08);
-  --text: #f4f8fb;
-  --muted: #9db0bb;
-  --accent: #6ef3b0;
-  --accent-strong: #10d98c;
-  --danger: #ff6a6a;
-  --warning: #ffd36c;
-  --info: #7ec8ff;
-  --shadow: 0 22px 44px rgba(0, 0, 0, 0.25);
+  --bg: #120606;
+  --panel: rgba(24, 9, 9, 0.86);
+  --panel-border: rgba(255, 197, 177, 0.12);
+  --text: #fff2ed;
+  --muted: #cba7a0;
+  --accent: #ff7a2f;
+  --accent-strong: #ff4121;
+  --danger: #ff5f4f;
+  --warning: #ffb25e;
+  --info: #ff9958;
+  --shadow: 0 22px 44px rgba(0, 0, 0, 0.35);
   --radius: 24px;
 }
 
@@ -24,9 +24,9 @@ body {
   min-height: 100%;
   font-family: "Barlow", sans-serif;
   background:
-    radial-gradient(circle at top left, rgba(110, 243, 176, 0.18), transparent 34%),
-    radial-gradient(circle at top right, rgba(41, 128, 185, 0.18), transparent 30%),
-    linear-gradient(180deg, #09161d 0%, #07131a 100%);
+    radial-gradient(circle at top left, rgba(255, 122, 47, 0.18), transparent 34%),
+    radial-gradient(circle at top right, rgba(255, 65, 33, 0.2), transparent 30%),
+    linear-gradient(180deg, #150707 0%, #090202 100%);
   color: var(--text);
 }
 
@@ -77,6 +77,7 @@ button {
 .page,
 .live-stage,
 .speed-stack,
+.title-row,
 .gforce-stage,
 .runs-layout,
 .imu-layout {
@@ -106,7 +107,7 @@ button {
 }
 
 .tab-button.active {
-  color: #082014;
+  color: #240903;
   background: linear-gradient(135deg, var(--accent), var(--accent-strong));
 }
 
@@ -138,7 +139,7 @@ button {
   inset: auto -15% -20% auto;
   width: 240px;
   height: 240px;
-  background: radial-gradient(circle, rgba(110, 243, 176, 0.16), transparent 70%);
+  background: radial-gradient(circle, rgba(255, 122, 47, 0.18), transparent 70%);
   pointer-events: none;
 }
 
@@ -161,6 +162,29 @@ h1,
 h2,
 .speed-value {
   font-family: "Space Grotesk", sans-serif;
+}
+
+.title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 153, 88, 0.28);
+  background: rgba(255, 122, 47, 0.14);
+  color: #ffb589;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .speed-stack {
@@ -192,7 +216,7 @@ h2,
 }
 
 .status-pill.recording {
-  color: #08140c;
+  color: #240903;
   background: var(--accent);
 }
 
@@ -229,13 +253,13 @@ h2,
 
 .primary-button {
   background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-  color: #082014;
+  color: #240903;
 }
 
 .danger-button {
-  background: rgba(255, 106, 106, 0.16);
-  color: #ffdede;
-  border: 1px solid rgba(255, 106, 106, 0.25);
+  background: rgba(255, 95, 79, 0.16);
+  color: #ffe5e0;
+  border: 1px solid rgba(255, 95, 79, 0.28);
 }
 
 .secondary-button {
@@ -282,8 +306,8 @@ button:not(:disabled):active {
 .callout {
   padding: 0.9rem 1rem;
   border-radius: 18px;
-  background: rgba(255, 211, 108, 0.12);
-  color: #ffe9b2;
+  background: rgba(255, 122, 47, 0.12);
+  color: #ffd9c2;
 }
 
 .field {
@@ -327,8 +351,8 @@ button:not(:disabled):active {
 }
 
 .run-card.active {
-  border-color: rgba(110, 243, 176, 0.55);
-  background: rgba(110, 243, 176, 0.08);
+  border-color: rgba(255, 122, 47, 0.5);
+  background: rgba(255, 122, 47, 0.1);
 }
 
 .run-card h3 {

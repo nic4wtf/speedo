@@ -4,8 +4,8 @@
   "description": "Mobile-first motorsport telemetry recorder for GNSS and accelerometer data.",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#07131a",
-  "theme_color": "#10212b",
+  "background_color": "#120606",
+  "theme_color": "#210907",
   "icons": [
     {
       "src": "./assets/icon.svg",
