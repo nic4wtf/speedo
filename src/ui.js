@@ -66,6 +66,7 @@ export class TelemetryUI {
     this.mapView = null;
     this.charts = null;
     this.imuView = null;
+    this.currentPage = "recorderPage";
     this.recordingActive = false;
     this.imuStreaming = false;
     this.elapsedTimer = null;
@@ -85,6 +86,7 @@ export class TelemetryUI {
     this.updateSettingSummary();
     this.refreshOrientationSummary();
     this.drawGForceCircle(this.orientation.project(null));
+    this.syncSensors();
     await this.refreshRuns();
   }
 
@@ -105,6 +107,7 @@ export class TelemetryUI {
     this.exportJsonButton = document.getElementById("exportJsonButton");
     this.exportCsvButton = document.getElementById("exportCsvButton");
     this.deleteRunButton = document.getElementById("deleteRunButton");
+    this.checkUpdatesButton = document.getElementById("checkUpdatesButton");
     this.installButton = document.getElementById("installButton");
     this.sampleRateInput = document.getElementById("sampleRateInput");
     this.maxDurationInput = document.getElementById("maxDurationInput");
@@ -146,6 +149,7 @@ export class TelemetryUI {
     this.exportJsonButton.addEventListener("click", () => this.exportRun("json"));
     this.exportCsvButton.addEventListener("click", () => this.exportRun("csv"));
     this.deleteRunButton.addEventListener("click", () => this.handleDeleteRun());
+    this.checkUpdatesButton.addEventListener("click", () => this.handleCheckForUpdates());
     this.sampleRateInput.addEventListener("input", () => this.updateSettingSummary());
     this.maxDurationInput.addEventListener("input", () => this.updateSettingSummary());
     this.lapDistanceInput.addEventListener("input", () => this.updateSettingSummary());
@@ -183,13 +187,57 @@ export class TelemetryUI {
     if ("serviceWorker" in navigator) {
       try {
         this.serviceWorkerRegistration = await navigator.serviceWorker.register("./sw.js");
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (this.reloadingForUpdate) {
+            return;
+          }
+          this.reloadingForUpdate = true;
+          window.location.reload();
+        });
       } catch (error) {
         console.warn("Service worker registration failed", error);
       }
     }
   }
 
+  async handleCheckForUpdates() {
+    if (!this.serviceWorkerRegistration) {
+      this.showPermissionMessage("Update checks are unavailable because the service worker is not active.");
+      return;
+    }
+
+    this.checkUpdatesButton.disabled = true;
+
+    try {
+      await this.serviceWorkerRegistration.update();
+      const installingWorker = this.serviceWorkerRegistration.installing;
+      if (installingWorker) {
+        await new Promise((resolve) => {
+          installingWorker.addEventListener("statechange", () => {
+            if (installingWorker.state === "installed") {
+              resolve();
+            }
+          });
+        });
+      }
+
+      if (this.serviceWorkerRegistration.waiting) {
+        this.showPermissionMessage("New version found. Reloading into the latest build.");
+        this.serviceWorkerRegistration.waiting.postMessage({ type: "SKIP_WAITING" });
+        return;
+      }
+
+      this.showPermissionMessage("You are already on the latest version available to this phone.");
+    } catch (error) {
+      console.warn("Update check failed", error);
+      this.showPermissionMessage("Update check failed. Make sure the phone is online and try again.");
+    } finally {
+      this.checkUpdatesButton.disabled = false;
+    }
+  }
+
   showPage(pageId) {
+    this.currentPage = pageId;
     for (const page of this.pages) {
       page.classList.toggle("active", page.id === pageId);
     }
@@ -197,6 +245,8 @@ export class TelemetryUI {
     for (const button of this.tabButtons) {
       button.classList.toggle("active", button.dataset.page === pageId);
     }
+
+    this.syncSensors();
   }
 
   getRecorderOptions() {
@@ -550,7 +600,7 @@ export class TelemetryUI {
 
   syncSensors() {
     this.sensors.setStreams({
-      location: this.recordingActive,
+      location: this.recordingActive || this.currentPage === "recorderPage",
       motion: this.imuStreaming || (this.recordingActive && !this.orientation.isSkipped()),
     });
     this.updateImuButtons();

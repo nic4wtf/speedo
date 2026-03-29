@@ -1,4 +1,4 @@
-const CACHE_NAME = "telemetry-tracker-v3";
+const CACHE_NAME = "telemetry-tracker-v4";
 const APP_ASSETS = [
   "./",
   "./index.html",
@@ -70,4 +70,10 @@ self.addEventListener("notificationclick", (event) => {
       return Promise.resolve();
     }),
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });

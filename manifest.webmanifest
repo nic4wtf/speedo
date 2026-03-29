@@ -1,6 +1,6 @@
 {
-  "name": "Telemetry Tracker",
-  "short_name": "Telemetry",
+  "name": "Speedo",
+  "short_name": "Speedo",
   "description": "Mobile-first motorsport telemetry recorder for GNSS and accelerometer data.",
   "start_url": "./",
   "display": "standalone",
